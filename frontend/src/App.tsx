@@ -390,9 +390,10 @@ function Studio({
         {optimization && (
           <span
             className="optimization-note"
-            title={`${optimization.calibration}; stabilized ${optimization.stabilizedContacts.join(', ')}`}
+            title={`${optimization.calibration}; stabilized ${optimization.stabilizedContacts.join(', ') || 'no hands'}`}
           >
             Auto-optimized · fixed bones · {optimization.stabilizedContacts.length} hand contacts
+            {(optimization.armDepthRegularization ?? 0) > 0.5 && ' · arm depth'}
           </span>
         )}
         <p>Hand percentages are directly detected frames · single-camera depth is constrained</p>

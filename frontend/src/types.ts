@@ -40,6 +40,7 @@ export type MotionResult = {
       calibration: string
       fixedBoneLengths: boolean
       rigidHead: boolean
+      armDepthRegularization?: number
       stabilizedContacts: string[]
       boneVariationBefore: number
       boneVariationAfter: number

@@ -28,9 +28,10 @@ FastAPI job service
 7. Short low-confidence gaps reuse the last reliable observation and are marked as inferred.
 8. Robust clip-wide medians estimate symmetric limb, torso, hand, and head proportions without requiring a calibration pose.
 9. A kinematic pass enforces fixed bone lengths and treats the sparse face landmarks as a rigid head.
-10. Low image-space motion identifies likely planted hands; their ground-plane coordinates provide a reach-limited target for a two-bone IK solve.
-11. Results and optimization diagnostics are serialized using a versioned schema.
-12. The experimental BVH exporter estimates fixed rest offsets and per-joint rotations from the constrained motion.
+10. Clip-wide bilateral arm overlap identifies side-view depth ambiguity. In that case, arm directions are smoothly projected into each shoulder's sagittal plane; clearly separated views are left unchanged.
+11. Low image-space motion identifies likely planted hands; their ground-plane coordinates provide a reach-limited target for a two-bone IK solve.
+12. Results and optimization diagnostics are serialized using a versioned schema.
+13. The experimental BVH exporter estimates fixed rest offsets and per-joint rotations from the constrained motion.
 
 ## Deliberate boundaries
 

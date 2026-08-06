@@ -96,6 +96,7 @@ def test_optimizer_auto_calibrates_bones_contacts_and_face() -> None:
     }
     assert report.bone_variation_after < report.bone_variation_before
     assert report.contact_drift_after_meters < report.contact_drift_before_meters
+    assert report.arm_depth_regularization == 0.0
 
 
 def test_optimizer_does_not_pin_stationary_hands_above_the_support_plane() -> None:
@@ -108,3 +109,36 @@ def test_optimizer_does_not_pin_stationary_hands_above_the_support_plane() -> No
     report = optimize_motion(frames, fps=25.0)
 
     assert report.stabilized_contacts == ()
+
+
+def test_optimizer_regularizes_overlapping_side_view_arms_into_sagittal_plane() -> None:
+    frames = [frame(index, 1.0) for index in range(10)]
+    for value in frames:
+        body = {landmark["index"]: landmark for landmark in value["body"]}
+        biased_positions = {
+            13: (-0.48, 0.12, -0.18),
+            15: (-0.72, 0.22, -0.36),
+            14: (0.36, 0.12, -0.18),
+            16: (0.52, 0.22, -0.36),
+        }
+        overlapping_image = {
+            13: (0.58, 0.42),
+            14: (0.585, 0.42),
+            15: (0.68, 0.44),
+            16: (0.685, 0.44),
+        }
+        for index, position in biased_positions.items():
+            body[index]["world"] = dict(zip(("x", "y", "z"), position, strict=True))
+            body[index]["x"], body[index]["y"] = overlapping_image[index]
+
+    report = optimize_motion(frames, fps=25.0)
+
+    assert report.arm_depth_regularization > 0.99
+    for value in frames:
+        body = {landmark["index"]: landmark for landmark in value["body"]}
+        lateral = world(body, 12) - world(body, 11)
+        lateral /= np.linalg.norm(lateral)
+        for start, end in ((11, 13), (13, 15), (12, 14), (14, 16)):
+            direction = world(body, end) - world(body, start)
+            direction /= np.linalg.norm(direction)
+            assert abs(float(np.dot(direction, lateral))) < 1e-6
