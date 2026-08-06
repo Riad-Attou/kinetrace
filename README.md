@@ -11,6 +11,7 @@ The application is intentionally local: uploaded videos, extracted landmarks, an
 - Fuse pose and hand landmarks into a common 3D coordinate space.
 - Auto-calibrate a symmetric skeleton from ordinary motion frames; no T-pose is required.
 - Enforce fixed bone lengths and softly stabilize likely planted hands.
+- Correct side-view arm depth when the left and right arms overlap in the source footage.
 - Treat sparse pose face landmarks as one rigid head instead of independent drifting points.
 - Preview the video overlay and 3D skeleton on a shared timeline.
 - Loop playback while inspecting a reconstructed movement.
