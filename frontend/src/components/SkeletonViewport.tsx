@@ -31,6 +31,7 @@ type SceneState = {
 }
 
 type ViewMode = 'avatar' | 'skeleton' | 'both'
+type CameraView = 'front' | 'side' | 'top'
 
 export function SkeletonViewport({
   frame,
@@ -40,6 +41,7 @@ export function SkeletonViewport({
   const containerRef = useRef<HTMLDivElement>(null)
   const stateRef = useRef<SceneState | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('avatar')
+  const [cameraView, setCameraView] = useState<CameraView | null>(null)
 
   useEffect(() => {
     const container = containerRef.current
@@ -69,6 +71,8 @@ export function SkeletonViewport({
     controls.target.set(0, -0.18, 0)
     controls.minDistance = 1.4
     controls.maxDistance = 7
+    const clearCameraPreset = () => setCameraView(null)
+    controls.addEventListener('start', clearCameraPreset)
 
     const grid = new THREE.GridHelper(4, 16, '#30353c', '#20242a')
     grid.position.y = -1.03
@@ -126,6 +130,7 @@ export function SkeletonViewport({
     return () => {
       resize.disconnect()
       cancelAnimationFrame(state.animationFrame)
+      controls.removeEventListener('start', clearCameraPreset)
       controls.dispose()
       renderer.dispose()
       scene.traverse((object) => {
@@ -159,6 +164,41 @@ export function SkeletonViewport({
     state.avatar.group.visible = viewMode === 'avatar' || viewMode === 'both'
   }, [viewMode])
 
+  const selectCameraView = (mode: CameraView) => {
+    const state = stateRef.current
+    if (!state || !frame) return
+    const body = new Map(
+      frame.body.map((landmark) => [landmark.index, new THREE.Vector3(...scenePosition(landmark))]),
+    )
+    const leftShoulder = body.get(11)
+    const rightShoulder = body.get(12)
+    const leftHip = body.get(23)
+    const rightHip = body.get(24)
+    if (!leftShoulder || !rightShoulder || !leftHip || !rightHip) return
+
+    const shoulderCenter = leftShoulder.clone().add(rightShoulder).multiplyScalar(0.5)
+    const hipCenter = leftHip.clone().add(rightHip).multiplyScalar(0.5)
+    const target = shoulderCenter.clone().add(hipCenter).multiplyScalar(0.5)
+    const up = new THREE.Vector3(0, 1, 0)
+    const lateral = rightShoulder.clone().sub(leftShoulder)
+    lateral.y = 0
+    lateral.normalize()
+    const forward = lateral.clone().cross(up).normalize()
+    const direction = mode === 'front' ? forward : mode === 'side' ? lateral : up
+    const distance = THREE.MathUtils.clamp(
+      state.camera.position.distanceTo(state.controls.target),
+      state.controls.minDistance,
+      state.controls.maxDistance,
+    )
+
+    state.camera.up.copy(mode === 'top' ? forward : up)
+    state.camera.position.copy(target).addScaledVector(direction, distance)
+    state.controls.target.copy(target)
+    state.camera.lookAt(target)
+    state.controls.update()
+    setCameraView(mode)
+  }
+
   return (
     <div className="viewer-shell skeleton-viewer" ref={containerRef}>
       <div className="viewer-label">
@@ -171,6 +211,19 @@ export function SkeletonViewport({
             type="button"
             aria-pressed={viewMode === mode}
             onClick={() => setViewMode(mode)}
+            key={mode}
+          >
+            {mode}
+          </button>
+        ))}
+      </div>
+      <div className="viewer-camera-toggle" role="group" aria-label="Camera view">
+        {(['front', 'side', 'top'] as const).map((mode) => (
+          <button
+            className={cameraView === mode ? 'active' : ''}
+            type="button"
+            aria-pressed={cameraView === mode}
+            onClick={() => selectCameraView(mode)}
             key={mode}
           >
             {mode}

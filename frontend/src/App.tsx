@@ -390,12 +390,15 @@ function Studio({
         {optimization && (
           <span
             className="optimization-note"
-            title={`${optimization.calibration}; stabilized ${optimization.stabilizedContacts.join(', ') || 'no hands'}`}
+            title={`${optimization.calibration}; stabilized ${optimization.stabilizedContacts.join(', ') || 'no contacts'}`}
           >
-            Auto-optimized · fixed bones · {optimization.stabilizedContacts.length} hand contacts
+            Auto-optimized · fixed bones · {optimization.stabilizedContacts.length} contacts
+            {optimization.temporalSmoothing && ' · motion smoothing'}
+            {optimization.rootTranslation && ' · root solve'}
             {(optimization.armDepthRegularization ?? 0) > 0.5 && ' · arm depth'}
             {(optimization.headCenterRegularization ?? 0) > 0.5 && ' · head center'}
             {(optimization.legLateralRegularization ?? 0) > 0.5 && ' · leg balance'}
+            {(optimization.legPoseRegularization ?? 0) > 0.5 && ' · leg symmetry'}
             {(optimization.torsoAxisRegularization ?? 0) > 0.5 && ' · torso frame'}
             {(optimization.pairedHandRegularization ?? 0) > 0.5 && ' · hand pair'}
           </span>

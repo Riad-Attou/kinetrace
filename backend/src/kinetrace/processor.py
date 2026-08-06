@@ -132,7 +132,7 @@ def process_video(job_id: str, store: JobStore) -> None:
                 "fps": fps,
                 "frameCount": len(frames),
                 "durationMs": actual_duration,
-                "coordinateSpace": "Auto-constrained MediaPipe root-relative world metres",
+                "coordinateSpace": "Auto-constrained contact-anchored world metres",
                 "handAssignment": "nearest pose wrist",
                 "optimization": optimization.to_json(),
             },
