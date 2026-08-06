@@ -406,7 +406,11 @@ def _constrain_body(
         _set_world(body[index], value)
 
     raw_shoulder_center = (raw[11] + raw[12]) * 0.5
-    torso_axis = _unit(raw_shoulder_center - hip_center)
+    raw_torso_axis = _unit(raw_shoulder_center - hip_center)
+    centered_torso_axis = _project_to_sagittal(raw_torso_axis, body_lateral_axis)
+    torso_axis = _blend_direction(
+        raw_torso_axis, centered_torso_axis, body_side_weight
+    )
     shoulder_center = hip_center + torso_axis * lengths["torso"]
     raw_shoulder_axis = raw[12] - raw[11]
     raw_shoulder_axis -= torso_axis * float(np.dot(raw_shoulder_axis, torso_axis))
