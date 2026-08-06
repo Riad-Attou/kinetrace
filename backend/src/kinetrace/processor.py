@@ -14,6 +14,7 @@ from kinetrace.landmarks import (
     HAND_LANDMARK_NAMES,
     POSE_LANDMARK_NAMES,
     TemporalStabilizer,
+    assign_hand_sides,
     fuse_hand_world,
     serialize_landmark,
 )
@@ -67,7 +68,8 @@ def process_video(job_id: str, store: JobStore) -> None:
         frames: list[dict[str, Any]] = []
         stabilizer = TemporalStabilizer()
         pose_frame_count = 0
-        hand_frame_count = {"left": 0, "right": 0}
+        hand_detection_count = {"left": 0, "right": 0}
+        hand_usable_count = {"left": 0, "right": 0}
         confidence_total = 0.0
         confidence_count = 0
         frame_index = 0
@@ -96,8 +98,10 @@ def process_video(job_id: str, store: JobStore) -> None:
                 if frame["body"]:
                     pose_frame_count += 1
                 for side in ("left", "right"):
+                    if raw_frame["hands"][side]:
+                        hand_detection_count[side] += 1
                     if frame["hands"][side]:
-                        hand_frame_count[side] += 1
+                        hand_usable_count[side] += 1
                 for point in frame["body"]:
                     confidence_total += float(point["confidence"])
                     confidence_count += 1
@@ -126,6 +130,7 @@ def process_video(job_id: str, store: JobStore) -> None:
                 "frameCount": len(frames),
                 "durationMs": actual_duration,
                 "coordinateSpace": "MediaPipe root-relative world metres",
+                "handAssignment": "nearest pose wrist",
             },
             "skeleton": {
                 "bodyLandmarks": list(POSE_LANDMARK_NAMES),
@@ -135,8 +140,10 @@ def process_video(job_id: str, store: JobStore) -> None:
             },
             "quality": {
                 "poseCoverage": pose_frame_count / len(frames),
-                "leftHandCoverage": hand_frame_count["left"] / len(frames),
-                "rightHandCoverage": hand_frame_count["right"] / len(frames),
+                "leftHandCoverage": hand_detection_count["left"] / len(frames),
+                "rightHandCoverage": hand_detection_count["right"] / len(frames),
+                "leftHandUsableCoverage": hand_usable_count["left"] / len(frames),
+                "rightHandUsableCoverage": hand_usable_count["right"] / len(frames),
                 "averageBodyConfidence": confidence_total / max(confidence_count, 1),
             },
             "frames": frames,
@@ -174,22 +181,14 @@ def _serialize_frame(timestamp_ms: int, pose_result: Any, hand_result: Any) -> d
     handedness = getattr(hand_result, "handedness", [])
     image_hands = getattr(hand_result, "hand_landmarks", [])
     world_hands = getattr(hand_result, "hand_world_landmarks", [])
-    for index, categories in enumerate(handedness):
-        if not categories or index >= len(image_hands) or index >= len(world_hands):
+    assignments = assign_hand_sides(body, image_hands, handedness)
+    for index, image_points in enumerate(image_hands):
+        if index >= len(world_hands) or index not in assignments:
             continue
-        category = categories[0]
-        label = str(
-            getattr(category, "category_name", None)
-            or getattr(category, "display_name", None)
-            or ""
-        ).lower()
-        side = "left" if label == "left" else "right" if label == "right" else ""
-        if not side:
-            continue
-        score = float(getattr(category, "score", 0.0))
+        side = assignments[index]
         fused_world = fuse_hand_world(body, world_hands[index], side)
         points: list[dict[str, Any]] = []
-        for point_index, image_point in enumerate(image_hands[index]):
+        for point_index, image_point in enumerate(image_points):
             point = {
                 "index": point_index,
                 "name": HAND_LANDMARK_NAMES[point_index],
@@ -197,7 +196,10 @@ def _serialize_frame(timestamp_ms: int, pose_result: Any, hand_result: Any) -> d
                 "y": float(image_point.y),
                 "z": float(image_point.z),
                 "world": fused_world[point_index],
-                "confidence": score,
+                # The result exposes handedness classification, not per-landmark
+                # confidence. Returned landmarks have already passed the configured
+                # detection/presence/tracking thresholds.
+                "confidence": 1.0,
                 "inferred": False,
             }
             points.append(point)

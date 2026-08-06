@@ -195,6 +195,67 @@ def fuse_hand_world(
     return fused
 
 
+def assign_hand_sides(
+    body_landmarks: list[dict[str, Any]],
+    image_hands: list[list[Any]],
+    handedness: list[list[Any]],
+) -> dict[int, str]:
+    """Assign detected hands to pose sides without trusting ambiguous palm labels.
+
+    Handedness classification can become ambiguous when both palms have a similar
+    orientation. The pose model already provides stable left/right wrists, so image
+    distance is the stronger identity signal for a single visible person.
+    """
+    body_by_index = {int(point["index"]): point for point in body_landmarks}
+    pose_wrists = {
+        side: np.array([body_by_index[index]["x"], body_by_index[index]["y"]], dtype=float)
+        for side, index in (("left", 15), ("right", 16))
+        if index in body_by_index
+    }
+    assignments: dict[int, str] = {}
+
+    if len(pose_wrists) == 2 and image_hands:
+        hand_wrists = [np.array([points[0].x, points[0].y], dtype=float) for points in image_hands]
+        if len(hand_wrists) == 1:
+            assignments[0] = min(
+                pose_wrists,
+                key=lambda side: float(np.linalg.norm(hand_wrists[0] - pose_wrists[side])),
+            )
+        else:
+            direct_cost = float(
+                np.linalg.norm(hand_wrists[0] - pose_wrists["left"])
+                + np.linalg.norm(hand_wrists[1] - pose_wrists["right"])
+            )
+            crossed_cost = float(
+                np.linalg.norm(hand_wrists[0] - pose_wrists["right"])
+                + np.linalg.norm(hand_wrists[1] - pose_wrists["left"])
+            )
+            if direct_cost <= crossed_cost:
+                assignments.update({0: "left", 1: "right"})
+            else:
+                assignments.update({0: "right", 1: "left"})
+
+    available_sides = [side for side in ("left", "right") if side not in assignments.values()]
+    for hand_index in range(len(image_hands)):
+        if hand_index in assignments:
+            continue
+        label = ""
+        if hand_index < len(handedness) and handedness[hand_index]:
+            category = handedness[hand_index][0]
+            label = str(
+                getattr(category, "category_name", None)
+                or getattr(category, "display_name", None)
+                or ""
+            ).lower()
+        if label in available_sides:
+            assignments[hand_index] = label
+            available_sides.remove(label)
+        elif available_sides:
+            assignments[hand_index] = available_sides.pop(0)
+
+    return assignments
+
+
 @dataclass(slots=True)
 class _LandmarkState:
     point: dict[str, Any]
@@ -213,7 +274,7 @@ class TemporalStabilizer:
         stabilized = {"timestampMs": frame["timestampMs"]}
         stabilized["body"] = self._group("body", frame.get("body", []), 0.45)
         stabilized["hands"] = {
-            side: self._group(f"hand:{side}", frame.get("hands", {}).get(side, []), 0.35)
+            side: self._group(f"hand:{side}", frame.get("hands", {}).get(side, []), 0.5)
             for side in ("left", "right")
         }
         return stabilized

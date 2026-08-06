@@ -10,6 +10,7 @@ The application is intentionally local: uploaded videos, extracted landmarks, an
 - Detect one full-body pose and up to two hands per frame.
 - Fuse pose and hand landmarks into a common 3D coordinate space.
 - Preview the video overlay and 3D skeleton on a shared timeline.
+- Loop playback while inspecting a reconstructed movement.
 - Mark low-confidence or held landmark observations.
 - Export canonical JSON and an experimental BVH armature animation.
 
@@ -56,6 +57,8 @@ For the best first results:
 - Avoid loose sleeves covering wrists and hands.
 
 Single-camera 3D is inferred rather than measured. Depth, contacts, and occluded joints can therefore be approximate. KineTrace exposes confidence instead of hiding that uncertainty.
+
+Hand tracking percentages measure the share of frames where that hand was directly detected. A hidden hand can therefore have lower coverage even when its visible detections are accurate.
 
 ## Data and exports
 
