@@ -225,6 +225,7 @@ def test_optimizer_leaves_leg_spread_alone_when_body_sides_are_visible() -> None
     report = optimize_motion(frames, fps=25.0)
 
     assert report.leg_lateral_regularization == 0.0
+    assert report.torso_axis_regularization == 0.0
     for value, before in zip(frames, directions_before, strict=True):
         body = {landmark["index"]: landmark for landmark in value["body"]}
         for chain_index, (hip, knee) in enumerate(((23, 25), (24, 26))):
@@ -232,3 +233,37 @@ def test_optimizer_leaves_leg_spread_alone_when_body_sides_are_visible() -> None
             direction /= np.linalg.norm(direction)
             prior = before[chain_index] / np.linalg.norm(before[chain_index])
             assert float(np.dot(direction, prior)) > 0.999
+
+
+def test_optimizer_uses_one_level_torso_axis_for_side_views() -> None:
+    frames = [frame(index, 1.0) for index in range(10)]
+    for frame_index, value in enumerate(frames):
+        body = {landmark["index"]: landmark for landmark in value["body"]}
+        phase = np.sin(frame_index * 0.7)
+        hip_axis = np.array([0.28, 0.035 * phase, 0.13])
+        shoulder_axis = np.array([0.40, -0.07 * phase, -0.10])
+        hip_center = np.array([0.0, 0.48, 0.0])
+        shoulder_center = np.array([0.0, 0.0, 0.0])
+        for index, position in {
+            23: hip_center - hip_axis * 0.5,
+            24: hip_center + hip_axis * 0.5,
+            11: shoulder_center - shoulder_axis * 0.5,
+            12: shoulder_center + shoulder_axis * 0.5,
+        }.items():
+            body[index]["world"] = dict(zip(("x", "y", "z"), position, strict=True))
+
+    report = optimize_motion(frames, fps=25.0)
+
+    assert report.torso_axis_regularization > 0.99
+    axes: list[np.ndarray] = []
+    for value in frames:
+        body = {landmark["index"]: landmark for landmark in value["body"]}
+        hip_axis = world(body, 24) - world(body, 23)
+        shoulder_axis = world(body, 12) - world(body, 11)
+        hip_axis /= np.linalg.norm(hip_axis)
+        shoulder_axis /= np.linalg.norm(shoulder_axis)
+        assert abs(hip_axis[1]) < 1e-6
+        assert abs(shoulder_axis[1]) < 1e-6
+        assert float(np.dot(hip_axis, shoulder_axis)) > 0.999999
+        axes.append(hip_axis)
+    assert all(float(np.dot(axes[0], axis)) > 0.999999 for axis in axes[1:])
