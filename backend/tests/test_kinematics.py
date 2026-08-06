@@ -150,7 +150,7 @@ def test_optimizer_regularizes_overlapping_side_view_arms_into_sagittal_plane() 
             assert abs(float(np.dot(direction, lateral))) < 1e-6
         left_upper = world(body, 13) - world(body, 11)
         right_upper = world(body, 14) - world(body, 12)
-        assert abs(float(np.dot(left_upper - right_upper, torso))) < 0.02
+        assert abs(float(np.dot(left_upper - right_upper, torso))) < 1e-6
         ear_center = (world(body, 7) + world(body, 8)) * 0.5
         assert abs(float(np.dot(ear_center - shoulder_center, lateral))) < 1e-6
 
@@ -158,11 +158,13 @@ def test_optimizer_regularizes_overlapping_side_view_arms_into_sagittal_plane() 
 def test_optimizer_balances_hidden_leg_width_without_flattening_sagittal_motion() -> None:
     frames = [frame(index, 1.0) for index in range(10)]
     sagittal_before: list[tuple[np.ndarray, np.ndarray]] = []
-    for value in frames:
+    stance_before: list[float] = []
+    for frame_index, value in enumerate(frames):
         body = {landmark["index"]: landmark for landmark in value["body"]}
+        lateral_drift = 0.018 * frame_index
         biased_positions = {
-            25: (-0.42, 0.78, 0.10),
-            27: (-0.52, 1.12, 0.22),
+            25: (-0.42 - lateral_drift * 0.5, 0.78, 0.10),
+            27: (-0.52 - lateral_drift, 1.12, 0.22),
             26: (0.16, 0.76, -0.08),
             28: (0.17, 1.08, -0.22),
         }
@@ -176,10 +178,12 @@ def test_optimizer_balances_hidden_leg_width_without_flattening_sagittal_motion(
             direction -= lateral * float(np.dot(direction, lateral))
             projected.append(direction / np.linalg.norm(direction))
         sagittal_before.append((projected[0], projected[1]))
+        stance_before.append(abs(float(np.dot(world(body, 28) - world(body, 27), lateral))))
 
     report = optimize_motion(frames, fps=25.0)
 
     assert report.leg_lateral_regularization > 0.99
+    stance_after: list[float] = []
     for value, before in zip(frames, sagittal_before, strict=True):
         body = {landmark["index"]: landmark for landmark in value["body"]}
         lateral = world(body, 24) - world(body, 23)
@@ -188,6 +192,7 @@ def test_optimizer_balances_hidden_leg_width_without_flattening_sagittal_motion(
             float(np.dot(world(body, 27) - world(body, 23), lateral)),
             float(np.dot(world(body, 28) - world(body, 24), lateral)),
         ]
+        stance_after.append(abs(float(np.dot(world(body, 28) - world(body, 27), lateral))))
         assert offsets[0] < 0.0 < offsets[1]
         assert abs(abs(offsets[0]) - abs(offsets[1])) < 0.04
         for chain_index, (hip, knee) in enumerate(((23, 25), (24, 26))):
@@ -195,6 +200,7 @@ def test_optimizer_balances_hidden_leg_width_without_flattening_sagittal_motion(
             direction -= lateral * float(np.dot(direction, lateral))
             direction /= np.linalg.norm(direction)
             assert float(np.dot(direction, before[chain_index])) > 0.999
+    assert float(np.ptp(stance_after)) < float(np.ptp(stance_before)) * 0.2
 
 
 def test_optimizer_leaves_leg_spread_alone_when_body_sides_are_visible() -> None:

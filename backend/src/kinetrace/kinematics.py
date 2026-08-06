@@ -110,6 +110,7 @@ def optimize_motion(frames: list[dict[str, Any]], fps: float) -> OptimizationRep
     face_template = _face_template(frames)
     arm_depth_weight = _arm_depth_weight(frames)
     body_side_weight = _body_side_view_weight(frames)
+    leg_lateral_offset = _calibrate_leg_lateral_offset(frames, body_lengths)
     before_variation = _bone_variation(frames)
 
     for frame in frames:
@@ -119,6 +120,7 @@ def optimize_motion(frames: list[dict[str, Any]], fps: float) -> OptimizationRep
             face_template,
             arm_depth_weight,
             body_side_weight,
+            leg_lateral_offset,
         )
         _constrain_hands(frame, hand_lengths)
 
@@ -288,12 +290,42 @@ def _body_side_view_weight(frames: list[dict[str, Any]]) -> float:
     return weight * weight * (3.0 - 2.0 * weight)
 
 
+def _calibrate_leg_lateral_offset(
+    frames: list[dict[str, Any]], lengths: dict[str, float]
+) -> float:
+    """Estimate one robust stance half-width before per-frame constraints are applied."""
+    stance_widths: list[float] = []
+    for frame in frames:
+        body = _point_map(frame.get("body", []))
+        if not all(
+            index in body and _usable(body[index])
+            for index in (23, 24, 25, 26, 27, 28)
+        ):
+            continue
+        lateral_axis = _unit(_world(body[24]) - _world(body[23]))
+        offsets: list[float] = []
+        for hip, knee, ankle in ((23, 25, 27), (24, 26, 28)):
+            thigh = _unit(_world(body[knee]) - _world(body[hip]))
+            shin = _unit(_world(body[ankle]) - _world(body[knee]))
+            offset = (
+                lengths["thigh"] * float(np.dot(thigh, lateral_axis))
+                + lengths["shin"] * float(np.dot(shin, lateral_axis))
+            )
+            offsets.append(abs(offset))
+        stance_widths.append(lengths["hipWidth"] + sum(offsets))
+    if not stance_widths:
+        return 0.0
+    stance_width = float(np.median(stance_widths))
+    return max((stance_width - lengths["hipWidth"]) * 0.5, 0.0)
+
+
 def _constrain_body(
     frame: dict[str, Any],
     lengths: dict[str, float],
     face_template: Vector | None,
     arm_depth_weight: float,
     body_side_weight: float,
+    leg_lateral_offset: float,
 ) -> None:
     body = _point_map(frame.get("body", []))
     required = (11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28)
@@ -334,7 +366,7 @@ def _constrain_body(
     ]
     shared_upper = _shared_direction(upper_projected)
     shared_forearm = _shared_direction(forearm_projected)
-    symmetry_weight = arm_depth_weight * 0.85
+    symmetry_weight = arm_depth_weight
     for chain_index, (shoulder, elbow, wrist) in enumerate(arm_chains):
         upper_target = _blend_optional_shared_direction(
             upper_projected[chain_index], shared_upper, symmetry_weight
@@ -364,10 +396,15 @@ def _constrain_body(
     thigh_directions = [_unit(raw[knee] - raw[hip]) for hip, knee, *_ in leg_chains]
     shin_directions = [_unit(raw[ankle] - raw[knee]) for _, knee, ankle, *_ in leg_chains]
     leg_balance_weight = body_side_weight * 0.9
-    thigh_directions = _balance_lateral_pair(
-        thigh_directions, hip_axis, leg_balance_weight
+    thigh_directions, shin_directions = _stabilize_leg_lateral_directions(
+        thigh_directions,
+        shin_directions,
+        hip_axis,
+        lengths["thigh"],
+        lengths["shin"],
+        leg_lateral_offset,
+        leg_balance_weight,
     )
-    shin_directions = _balance_lateral_pair(shin_directions, hip_axis, leg_balance_weight)
     for chain_index, (hip, knee, ankle, foot, heel) in enumerate(leg_chains):
         knee_value = hips[hip] + thigh_directions[chain_index] * lengths["thigh"]
         ankle_value = knee_value + shin_directions[chain_index] * lengths["shin"]
@@ -412,26 +449,56 @@ def _blend_optional_shared_direction(
     return source if shared is None else _blend_direction(source, shared, weight)
 
 
-def _balance_lateral_pair(
-    directions: list[Vector], lateral_axis: Vector, weight: float
-) -> list[Vector]:
-    """Balance hidden left/right spread while preserving each sagittal direction."""
+def _stabilize_leg_lateral_directions(
+    thigh_directions: list[Vector],
+    shin_directions: list[Vector],
+    lateral_axis: Vector,
+    thigh_length: float,
+    shin_length: float,
+    target_offset: float,
+    weight: float,
+) -> tuple[list[Vector], list[Vector]]:
+    """Stabilize ankle width while minimally changing thigh and shin spread."""
     if weight <= 0.0:
-        return directions
-    lateral_values = [float(np.dot(direction, lateral_axis)) for direction in directions]
-    spread = float(np.mean(np.abs(lateral_values)))
-    targets = (-spread, spread)
-    balanced: list[Vector] = []
-    for direction, lateral_value, target in zip(
-        directions, lateral_values, targets, strict=True
+        return thigh_directions, shin_directions
+    balanced_thighs: list[Vector] = []
+    balanced_shins: list[Vector] = []
+    denominator = thigh_length**2 + shin_length**2
+    for thigh, shin, target in zip(
+        thigh_directions,
+        shin_directions,
+        (-target_offset, target_offset),
+        strict=True,
     ):
-        blended_lateral = float(
-            np.clip(lateral_value * (1.0 - weight) + target * weight, -0.95, 0.95)
+        thigh_lateral = float(np.dot(thigh, lateral_axis))
+        shin_lateral = float(np.dot(shin, lateral_axis))
+        current_offset = thigh_length * thigh_lateral + shin_length * shin_lateral
+        desired_offset = current_offset * (1.0 - weight) + target * weight
+        adjustment = (desired_offset - current_offset) / denominator
+        balanced_thighs.append(
+            _with_lateral_component(
+                thigh,
+                lateral_axis,
+                thigh_lateral + adjustment * thigh_length,
+            )
         )
-        sagittal = _project_to_sagittal(direction, lateral_axis)
-        sagittal_scale = float(np.sqrt(max(1.0 - blended_lateral**2, 0.0)))
-        balanced.append(sagittal * sagittal_scale + lateral_axis * blended_lateral)
-    return balanced
+        balanced_shins.append(
+            _with_lateral_component(
+                shin,
+                lateral_axis,
+                shin_lateral + adjustment * shin_length,
+            )
+        )
+    return balanced_thighs, balanced_shins
+
+
+def _with_lateral_component(
+    direction: Vector, lateral_axis: Vector, lateral_value: float
+) -> Vector:
+    lateral_value = float(np.clip(lateral_value, -0.95, 0.95))
+    sagittal = _project_to_sagittal(direction, lateral_axis)
+    sagittal_scale = float(np.sqrt(max(1.0 - lateral_value**2, 0.0)))
+    return sagittal * sagittal_scale + lateral_axis * lateral_value
 
 
 def _constrain_face(
