@@ -29,7 +29,7 @@ FastAPI job service
 8. Robust clip-wide medians estimate symmetric limb, torso, hand, and head proportions without requiring a calibration pose.
 9. A kinematic pass enforces fixed bone lengths and treats the sparse face landmarks as a rigid head.
 10. Clip-wide bilateral arm overlap identifies side-view depth ambiguity. In that case, arm directions are projected into each shoulder's sagittal plane and softly regularized toward a shared bilateral pose; clearly separated views are left unchanged.
-11. Clip-wide shoulder and hip overlap independently identifies body side views. When strong, the rigid head is centered in the torso's sagittal plane to remove unsupported lateral drift.
+11. Clip-wide shoulder and hip overlap independently identifies body side views. When strong, the rigid head is centered in the torso's sagittal plane and paired leg segments share a softly balanced lateral spread. Each leg's visible sagittal direction remains unchanged.
 12. Low image-space motion identifies likely planted hands; their ground-plane coordinates provide a reach-limited target for a two-bone IK solve.
 13. Results and optimization diagnostics are serialized using a versioned schema.
 14. The experimental BVH exporter estimates fixed rest offsets and per-joint rotations from the constrained motion.

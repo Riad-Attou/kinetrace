@@ -153,3 +153,76 @@ def test_optimizer_regularizes_overlapping_side_view_arms_into_sagittal_plane() 
         assert abs(float(np.dot(left_upper - right_upper, torso))) < 0.02
         ear_center = (world(body, 7) + world(body, 8)) * 0.5
         assert abs(float(np.dot(ear_center - shoulder_center, lateral))) < 1e-6
+
+
+def test_optimizer_balances_hidden_leg_width_without_flattening_sagittal_motion() -> None:
+    frames = [frame(index, 1.0) for index in range(10)]
+    sagittal_before: list[tuple[np.ndarray, np.ndarray]] = []
+    for value in frames:
+        body = {landmark["index"]: landmark for landmark in value["body"]}
+        biased_positions = {
+            25: (-0.42, 0.78, 0.10),
+            27: (-0.52, 1.12, 0.22),
+            26: (0.16, 0.76, -0.08),
+            28: (0.17, 1.08, -0.22),
+        }
+        for index, position in biased_positions.items():
+            body[index]["world"] = dict(zip(("x", "y", "z"), position, strict=True))
+        lateral = world(body, 24) - world(body, 23)
+        lateral /= np.linalg.norm(lateral)
+        projected = []
+        for hip, knee in ((23, 25), (24, 26)):
+            direction = world(body, knee) - world(body, hip)
+            direction -= lateral * float(np.dot(direction, lateral))
+            projected.append(direction / np.linalg.norm(direction))
+        sagittal_before.append((projected[0], projected[1]))
+
+    report = optimize_motion(frames, fps=25.0)
+
+    assert report.leg_lateral_regularization > 0.99
+    for value, before in zip(frames, sagittal_before, strict=True):
+        body = {landmark["index"]: landmark for landmark in value["body"]}
+        lateral = world(body, 24) - world(body, 23)
+        lateral /= np.linalg.norm(lateral)
+        offsets = [
+            float(np.dot(world(body, 27) - world(body, 23), lateral)),
+            float(np.dot(world(body, 28) - world(body, 24), lateral)),
+        ]
+        assert offsets[0] < 0.0 < offsets[1]
+        assert abs(abs(offsets[0]) - abs(offsets[1])) < 0.04
+        for chain_index, (hip, knee) in enumerate(((23, 25), (24, 26))):
+            direction = world(body, knee) - world(body, hip)
+            direction -= lateral * float(np.dot(direction, lateral))
+            direction /= np.linalg.norm(direction)
+            assert float(np.dot(direction, before[chain_index])) > 0.999
+
+
+def test_optimizer_leaves_leg_spread_alone_when_body_sides_are_visible() -> None:
+    frames = [frame(index, 1.0) for index in range(10)]
+    directions_before: list[tuple[np.ndarray, np.ndarray]] = []
+    for value in frames:
+        body = {landmark["index"]: landmark for landmark in value["body"]}
+        for index, image in {
+            11: (0.32, 0.42),
+            12: (0.68, 0.42),
+            23: (0.38, 0.62),
+            24: (0.62, 0.62),
+        }.items():
+            body[index]["x"], body[index]["y"] = image
+        directions_before.append(
+            (
+                world(body, 25) - world(body, 23),
+                world(body, 26) - world(body, 24),
+            )
+        )
+
+    report = optimize_motion(frames, fps=25.0)
+
+    assert report.leg_lateral_regularization == 0.0
+    for value, before in zip(frames, directions_before, strict=True):
+        body = {landmark["index"]: landmark for landmark in value["body"]}
+        for chain_index, (hip, knee) in enumerate(((23, 25), (24, 26))):
+            direction = world(body, knee) - world(body, hip)
+            direction /= np.linalg.norm(direction)
+            prior = before[chain_index] / np.linalg.norm(before[chain_index])
+            assert float(np.dot(direction, prior)) > 0.999

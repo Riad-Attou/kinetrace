@@ -72,6 +72,7 @@ class OptimizationReport:
     rigid_head: bool
     arm_depth_regularization: float
     head_center_regularization: float
+    leg_lateral_regularization: float
     stabilized_contacts: tuple[str, ...]
     bone_variation_before: float
     bone_variation_after: float
@@ -88,6 +89,7 @@ class OptimizationReport:
             "rigidHead": value["rigid_head"],
             "armDepthRegularization": value["arm_depth_regularization"],
             "headCenterRegularization": value["head_center_regularization"],
+            "legLateralRegularization": value["leg_lateral_regularization"],
             "stabilizedContacts": value["stabilized_contacts"],
             "boneVariationBefore": value["bone_variation_before"],
             "boneVariationAfter": value["bone_variation_after"],
@@ -107,7 +109,7 @@ def optimize_motion(frames: list[dict[str, Any]], fps: float) -> OptimizationRep
     hand_lengths = _calibrate_hand_lengths(frames)
     face_template = _face_template(frames)
     arm_depth_weight = _arm_depth_weight(frames)
-    head_center_weight = _body_side_view_weight(frames)
+    body_side_weight = _body_side_view_weight(frames)
     before_variation = _bone_variation(frames)
 
     for frame in frames:
@@ -116,7 +118,7 @@ def optimize_motion(frames: list[dict[str, Any]], fps: float) -> OptimizationRep
             body_lengths,
             face_template,
             arm_depth_weight,
-            head_center_weight,
+            body_side_weight,
         )
         _constrain_hands(frame, hand_lengths)
 
@@ -133,7 +135,8 @@ def optimize_motion(frames: list[dict[str, Any]], fps: float) -> OptimizationRep
         fixed_bone_lengths=True,
         rigid_head=face_template is not None,
         arm_depth_regularization=arm_depth_weight,
-        head_center_regularization=head_center_weight,
+        head_center_regularization=body_side_weight,
+        leg_lateral_regularization=body_side_weight,
         stabilized_contacts=tuple(dict.fromkeys(track.spec.label for track in tracks)),
         bone_variation_before=before_variation,
         bone_variation_after=_bone_variation(frames),
@@ -290,7 +293,7 @@ def _constrain_body(
     lengths: dict[str, float],
     face_template: Vector | None,
     arm_depth_weight: float,
-    head_center_weight: float,
+    body_side_weight: float,
 ) -> None:
     body = _point_map(frame.get("body", []))
     required = (11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28)
@@ -354,12 +357,20 @@ def _constrain_body(
             if attached in body:
                 _set_world(body[attached], raw[attached] + delta)
 
-    for hip, knee, ankle, foot, heel in (
+    leg_chains = (
         (23, 25, 27, 31, 29),
         (24, 26, 28, 32, 30),
-    ):
-        knee_value = hips[hip] + _unit(raw[knee] - raw[hip]) * lengths["thigh"]
-        ankle_value = knee_value + _unit(raw[ankle] - raw[knee]) * lengths["shin"]
+    )
+    thigh_directions = [_unit(raw[knee] - raw[hip]) for hip, knee, *_ in leg_chains]
+    shin_directions = [_unit(raw[ankle] - raw[knee]) for _, knee, ankle, *_ in leg_chains]
+    leg_balance_weight = body_side_weight * 0.9
+    thigh_directions = _balance_lateral_pair(
+        thigh_directions, hip_axis, leg_balance_weight
+    )
+    shin_directions = _balance_lateral_pair(shin_directions, hip_axis, leg_balance_weight)
+    for chain_index, (hip, knee, ankle, foot, heel) in enumerate(leg_chains):
+        knee_value = hips[hip] + thigh_directions[chain_index] * lengths["thigh"]
+        ankle_value = knee_value + shin_directions[chain_index] * lengths["shin"]
         _set_world(body[knee], knee_value)
         _set_world(body[ankle], ankle_value)
         if foot in body:
@@ -377,7 +388,7 @@ def _constrain_body(
             shoulder_axis,
             torso_axis,
             lengths["head"],
-            head_center_weight,
+            body_side_weight,
         )
 
 
@@ -399,6 +410,28 @@ def _blend_optional_shared_direction(
     source: Vector, shared: Vector | None, weight: float
 ) -> Vector:
     return source if shared is None else _blend_direction(source, shared, weight)
+
+
+def _balance_lateral_pair(
+    directions: list[Vector], lateral_axis: Vector, weight: float
+) -> list[Vector]:
+    """Balance hidden left/right spread while preserving each sagittal direction."""
+    if weight <= 0.0:
+        return directions
+    lateral_values = [float(np.dot(direction, lateral_axis)) for direction in directions]
+    spread = float(np.mean(np.abs(lateral_values)))
+    targets = (-spread, spread)
+    balanced: list[Vector] = []
+    for direction, lateral_value, target in zip(
+        directions, lateral_values, targets, strict=True
+    ):
+        blended_lateral = float(
+            np.clip(lateral_value * (1.0 - weight) + target * weight, -0.95, 0.95)
+        )
+        sagittal = _project_to_sagittal(direction, lateral_axis)
+        sagittal_scale = float(np.sqrt(max(1.0 - blended_lateral**2, 0.0)))
+        balanced.append(sagittal * sagittal_scale + lateral_axis * blended_lateral)
+    return balanced
 
 
 def _constrain_face(
