@@ -53,8 +53,6 @@ class ContactSpec:
 CONTACT_SPECS = (
     ContactSpec("left hand", 15, (11, 13, 15), (17, 19, 21), "left"),
     ContactSpec("right hand", 16, (12, 14, 16), (18, 20, 22), "right"),
-    ContactSpec("left foot", 31, (23, 25, 27), (29, 31)),
-    ContactSpec("right foot", 32, (24, 26, 28), (30, 32)),
 )
 
 
@@ -465,16 +463,9 @@ def _apply_contacts(
         desired_contact = contact.copy()
         desired_contact[[0, 2]] = track.target
         desired_end = raw_end + desired_contact - contact
-        first_length = lengths["upperArm" if spec.hand_side else "thigh"]
-        second_length = lengths["forearm" if spec.hand_side else "shin"]
+        first_length = lengths["upperArm"]
+        second_length = lengths["forearm"]
         start_value = _world(body[start])
-        desired_end = _reachable_with_fixed_ground_position(
-            start_value,
-            raw_end,
-            desired_end,
-            first_length,
-            second_length,
-        )
         solved_middle, solved_end = _solve_two_bone(
             start_value, _world(body[middle]), desired_end, first_length, second_length
         )
@@ -484,52 +475,6 @@ def _apply_contacts(
         for attached in spec.attachments:
             if attached in body:
                 _set_world(body[attached], _world(body[attached]) + delta)
-        if spec.point_index != end and spec.point_index in body:
-            adjusted = _world(body[spec.point_index])
-            adjusted[[0, 2]] = track.target
-            if not spec.hand_side:
-                adjusted = _fixed_length_with_ground_position(
-                    solved_end, _world(body[spec.point_index]), adjusted, lengths["foot"]
-                )
-            _set_world(body[spec.point_index], adjusted)
-
-
-def _reachable_with_fixed_ground_position(
-    start: Vector,
-    raw_end: Vector,
-    desired_end: Vector,
-    first: float,
-    second: float,
-) -> Vector:
-    """Prefer a planted X/Z contact and resolve ambiguous monocular height around it."""
-    minimum = abs(first - second) + 1e-5
-    maximum = first + second - 1e-5
-    raw_distance = float(np.linalg.norm(raw_end - start))
-    preferred_distance = float(np.clip(raw_distance, minimum, maximum))
-    ground_delta = desired_end[[0, 2]] - start[[0, 2]]
-    ground_distance = float(np.linalg.norm(ground_delta))
-    if ground_distance > maximum:
-        return desired_end
-    resolved_distance = max(preferred_distance, ground_distance)
-    height = float(np.sqrt(max(resolved_distance * resolved_distance - ground_distance**2, 0.0)))
-    sign = -1.0 if raw_end[1] < start[1] else 1.0
-    resolved = desired_end.copy()
-    resolved[1] = start[1] + sign * height
-    return resolved
-
-
-def _fixed_length_with_ground_position(
-    start: Vector, raw_end: Vector, desired_end: Vector, length: float
-) -> Vector:
-    ground_distance = float(np.linalg.norm(desired_end[[0, 2]] - start[[0, 2]]))
-    if ground_distance > length:
-        direction = _unit(desired_end[[0, 2]] - start[[0, 2]])
-        desired_end[[0, 2]] = start[[0, 2]] + direction * length
-        ground_distance = length
-    height = float(np.sqrt(max(length * length - ground_distance * ground_distance, 0.0)))
-    sign = -1.0 if raw_end[1] < start[1] else 1.0
-    desired_end[1] = start[1] + sign * height
-    return desired_end
 
 
 def _solve_two_bone(

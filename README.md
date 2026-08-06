@@ -10,7 +10,7 @@ The application is intentionally local: uploaded videos, extracted landmarks, an
 - Detect one full-body pose and up to two hands per frame.
 - Fuse pose and hand landmarks into a common 3D coordinate space.
 - Auto-calibrate a symmetric skeleton from ordinary motion frames; no T-pose is required.
-- Enforce fixed bone lengths and stabilize likely planted hands and feet.
+- Enforce fixed bone lengths and softly stabilize likely planted hands.
 - Treat sparse pose face landmarks as one rigid head instead of independent drifting points.
 - Preview the video overlay and 3D skeleton on a shared timeline.
 - Loop playback while inspecting a reconstructed movement.
@@ -61,7 +61,7 @@ For the best first results:
 
 Single-camera 3D is inferred rather than measured. Depth, contacts, and occluded joints can therefore be approximate. KineTrace exposes confidence instead of hiding that uncertainty.
 
-Automatic calibration uses robust median measurements from visible frames across the uploaded clip. Likely contacts are inferred from sustained low image-space motion, so an `Auto-optimized` summary lists how many hands or feet were stabilized.
+Automatic calibration uses robust median measurements from visible frames across the uploaded clip. Likely hand contacts are inferred from sustained low image-space motion, so an `Auto-optimized` summary lists how many were stabilized. Foot pinning is deliberately deferred until KineTrace has a root-translation and floor solve.
 
 Hand tracking percentages measure the share of frames where that hand was directly detected. A hidden hand can therefore have lower coverage even when its visible detections are accurate.
 
