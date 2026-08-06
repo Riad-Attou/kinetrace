@@ -88,13 +88,11 @@ def test_optimizer_auto_calibrates_bones_contacts_and_face() -> None:
     lengths = np.array(segment_lengths)
     contacts = np.array(wrist_ground_positions)
     assert float(np.ptp(lengths, axis=0).max()) < 1e-6
-    assert float(np.ptp(contacts, axis=0).max()) < 1e-6
+    assert float(np.ptp(contacts, axis=0).max()) < 0.01
     assert max(face_distances) - min(face_distances) < 1e-6
     assert set(report.stabilized_contacts) == {
         "left hand",
         "right hand",
-        "left foot",
-        "right foot",
     }
     assert report.bone_variation_after < report.bone_variation_before
     assert report.contact_drift_after_meters < report.contact_drift_before_meters
@@ -109,4 +107,4 @@ def test_optimizer_does_not_pin_stationary_hands_above_the_support_plane() -> No
 
     report = optimize_motion(frames, fps=25.0)
 
-    assert set(report.stabilized_contacts) == {"left foot", "right foot"}
+    assert report.stabilized_contacts == ()

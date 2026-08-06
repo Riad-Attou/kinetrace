@@ -28,7 +28,7 @@ FastAPI job service
 7. Short low-confidence gaps reuse the last reliable observation and are marked as inferred.
 8. Robust clip-wide medians estimate symmetric limb, torso, hand, and head proportions without requiring a calibration pose.
 9. A kinematic pass enforces fixed bone lengths and treats the sparse face landmarks as a rigid head.
-10. Low image-space motion identifies likely planted hands and feet; their ground-plane coordinates constrain a two-bone IK solve.
+10. Low image-space motion identifies likely planted hands; their ground-plane coordinates provide a reach-limited target for a two-bone IK solve.
 11. Results and optimization diagnostics are serialized using a versioned schema.
 12. The experimental BVH exporter estimates fixed rest offsets and per-joint rotations from the constrained motion.
 
@@ -36,7 +36,8 @@ FastAPI job service
 
 - Processing jobs are in memory in this first milestone; result files remain on disk, but the job list does not survive an API restart.
 - The 3D pose is root-relative. Global travel through a room is not reconstructed yet.
-- Contact detection is automatic and conservative, but it is still an inference rather than a user-confirmed physical constraint.
+- Hand-contact detection is automatic and conservative, but it is still an inference rather than a user-confirmed physical constraint.
+- Foot pinning requires a floor and root-translation solve; it is intentionally not approximated from hip-relative coordinates.
 - Finger/world fusion is approximate because the body and hand models use different world origins.
 - Hand tracking percentages report directly detected frames, not a landmark-confidence score.
 - The BVH exporter prioritizes a valid, inspectable armature hierarchy. Twist, contact, and retargeting polish are subsequent milestones.
