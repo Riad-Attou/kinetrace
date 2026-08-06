@@ -34,6 +34,8 @@ FastAPI job service
 13. Results and optimization diagnostics are serialized using a versioned schema.
 14. The experimental BVH exporter estimates fixed rest offsets and per-joint rotations from the constrained motion.
 
+The browser drives both its diagnostic skeleton and a built-in segmented mannequin directly from the same optimized landmarks. The mannequin is a local procedural preview rather than a skinned character, so it needs no external model and does not alter JSON or BVH exports.
+
 ## Deliberate boundaries
 
 - Processing jobs are in memory in this first milestone; result files remain on disk, but the job list does not survive an API restart.

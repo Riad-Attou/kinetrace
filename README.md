@@ -16,7 +16,7 @@ The application is intentionally local: uploaded videos, extracted landmarks, an
 - Use one level, clip-stable shoulder/hip axis and centerline to prevent side-view torso twist and lean.
 - Keep camera-hidden leg stance width stable in side views while preserving each leg's visible forward/back motion.
 - Align simultaneous planted hands along the body when an oblique side view makes their depth ambiguous.
-- Preview the video overlay and 3D skeleton on a shared timeline.
+- Preview the video overlay and either a solid articulated mannequin, the diagnostic 3D skeleton, or both on a shared timeline.
 - Loop playback while inspecting a reconstructed movement.
 - Mark low-confidence or held landmark observations.
 - Export canonical JSON and an experimental BVH armature animation.
