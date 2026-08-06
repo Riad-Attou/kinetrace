@@ -246,7 +246,7 @@ def test_optimizer_uses_one_level_torso_axis_for_side_views() -> None:
         hip_axis = np.array([0.28, 0.035 * phase, 0.13])
         shoulder_axis = np.array([0.40, -0.07 * phase, -0.10])
         hip_center = np.array([0.0, 0.48, 0.0])
-        shoulder_center = np.array([0.0, 0.0, 0.0])
+        shoulder_center = np.array([0.08 * phase, 0.0, 0.55])
         for index, position in {
             23: hip_center - hip_axis * 0.5,
             24: hip_center + hip_axis * 0.5,
@@ -268,6 +268,9 @@ def test_optimizer_uses_one_level_torso_axis_for_side_views() -> None:
         assert abs(hip_axis[1]) < 1e-6
         assert abs(shoulder_axis[1]) < 1e-6
         assert float(np.dot(hip_axis, shoulder_axis)) > 0.999999
+        hip_center = (world(body, 23) + world(body, 24)) * 0.5
+        shoulder_center = (world(body, 11) + world(body, 12)) * 0.5
+        assert abs(float(np.dot(shoulder_center - hip_center, hip_axis))) < 1e-6
         axes.append(hip_axis)
     assert all(float(np.dot(axes[0], axis)) > 0.999999 for axis in axes[1:])
 

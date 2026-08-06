@@ -13,7 +13,7 @@ The application is intentionally local: uploaded videos, extracted landmarks, an
 - Enforce fixed bone lengths and softly stabilize likely planted hands.
 - Correct side-view arm depth and bilateral symmetry when the left and right arms overlap in the source footage.
 - Treat sparse pose face landmarks as one rigid head, centering it when shoulder and hip overlap signals a side view.
-- Use one level, clip-stable shoulder/hip axis to prevent side-view torso twist.
+- Use one level, clip-stable shoulder/hip axis and centerline to prevent side-view torso twist and lean.
 - Keep camera-hidden leg stance width stable in side views while preserving each leg's visible forward/back motion.
 - Align simultaneous planted hands along the body when an oblique side view makes their depth ambiguous.
 - Preview the video overlay and 3D skeleton on a shared timeline.
