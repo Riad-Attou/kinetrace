@@ -16,7 +16,7 @@ A T-pose or known body measurement is not required. KineTrace estimates one robu
 
 ## Hand limitations
 
-Full-body framing makes hands small. When the hand model loses a hand, KineTrace may briefly hold the previous pose and labels those points as inferred. Longer gaps remain missing rather than creating arbitrary finger motion.
+Full-body framing makes hands small. When the hand model loses a hand, KineTrace interpolates short bounded gaps and labels those points as inferred. A hand identified as a planted support keeps one reliable articulated pose during contact. Longer gaps remain missing rather than creating arbitrary finger motion.
 
 ## Privacy
 

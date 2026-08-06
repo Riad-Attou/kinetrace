@@ -149,6 +149,8 @@ export function updateAvatarLayer(
     avatar.torso,
     shoulderCenter,
     hipCenter,
+    body.get(11),
+    body.get(12),
     shoulderWidth,
     Math.max(shoulderWidth * 0.42, hipWidth * 0.56),
   )
@@ -163,8 +165,8 @@ export function updateAvatarLayer(
     updateJoint(joint, body.get(index), bodyScale * jointRadius(index))
   }
 
-  updateFoot(avatar.feet.left, body, 27, 29, 31, bodyScale)
-  updateFoot(avatar.feet.right, body, 28, 30, 32, bodyScale)
+  updateFoot(avatar.feet.left, body, 27, 31, bodyScale)
+  updateFoot(avatar.feet.right, body, 28, 32, bodyScale)
 
   const facePoints = frame.body
     .filter((landmark) => landmark.index <= 10)
@@ -251,6 +253,8 @@ function updateTaperedTorso(
   torso: THREE.Mesh,
   shoulderCenter: THREE.Vector3 | undefined,
   hipCenter: THREE.Vector3 | undefined,
+  leftShoulder: THREE.Vector3 | undefined,
+  rightShoulder: THREE.Vector3 | undefined,
   width: number,
   depth: number,
 ) {
@@ -266,10 +270,20 @@ function updateTaperedTorso(
   }
   torso.visible = true
   torso.position.copy(shoulderCenter).add(hipCenter).multiplyScalar(0.5)
-  torso.quaternion.setFromUnitVectors(
-    new THREE.Vector3(0, 1, 0),
-    direction.multiplyScalar(1 / length),
-  )
+  const vertical = direction.multiplyScalar(1 / length)
+  const lateral = leftShoulder && rightShoulder
+    ? rightShoulder.clone().sub(leftShoulder)
+    : undefined
+  if (lateral) lateral.addScaledVector(vertical, -lateral.dot(vertical)).normalize()
+  if (lateral && lateral.lengthSq() > 1e-8) {
+    const depthAxis = lateral.clone().cross(vertical).normalize()
+    const correctedVertical = depthAxis.clone().cross(lateral).normalize()
+    torso.quaternion.setFromRotationMatrix(
+      new THREE.Matrix4().makeBasis(lateral, correctedVertical, depthAxis),
+    )
+  } else {
+    torso.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), vertical)
+  }
   torso.scale.set(width, length, depth)
 }
 
@@ -299,13 +313,10 @@ function updateFoot(
   foot: THREE.Mesh,
   body: Map<number, THREE.Vector3>,
   ankleIndex: number,
-  heelIndex: number,
   toeIndex: number,
   bodyScale: number,
 ) {
-  const heel = body.get(heelIndex) ?? body.get(ankleIndex)
-  const toe = body.get(toeIndex)
-  updateBone(foot, heel, toe, bodyScale * 0.105)
+  updateBone(foot, body.get(ankleIndex), body.get(toeIndex), bodyScale * 0.105)
 }
 
 function updateHand(

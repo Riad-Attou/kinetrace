@@ -93,6 +93,8 @@ def test_optimizer_auto_calibrates_bones_contacts_and_face() -> None:
     assert set(report.stabilized_contacts) == {
         "left hand",
         "right hand",
+        "left foot",
+        "right foot",
     }
     assert report.paired_hand_regularization > 0.99
     assert abs(float(np.median(contacts[:, 0, 1] - contacts[:, 1, 1]))) < 0.01
@@ -110,7 +112,59 @@ def test_optimizer_does_not_pin_stationary_hands_above_the_support_plane() -> No
 
     report = optimize_motion(frames, fps=25.0)
 
-    assert report.stabilized_contacts == ()
+    assert set(report.stabilized_contacts) == {"left foot", "right foot"}
+
+
+def test_optimizer_interpolates_short_hand_occlusions() -> None:
+    frames = [frame(index, 1.0) for index in range(10)]
+    for frame_index, value in enumerate(frames):
+        if 3 <= frame_index <= 5:
+            continue
+        value["hands"]["left"] = [
+            point(
+                index,
+                (-0.7 + index * 0.012, 0.24, 0.02 * frame_index),
+                (0.3 + index * 0.001, 0.88),
+            )
+            for index in range(21)
+        ]
+
+    optimize_motion(frames, fps=25.0)
+
+    assert all(len(value["hands"]["left"]) == 21 for value in frames)
+    assert all(
+        all(landmark["inferred"] for landmark in frames[index]["hands"]["left"])
+        for index in range(3, 6)
+    )
+
+
+def test_optimizer_recovers_root_motion_from_planted_feet() -> None:
+    frames = [frame(index, 1.0) for index in range(10)]
+    for frame_index, value in enumerate(frames):
+        body = {landmark["index"]: landmark for landmark in value["body"]}
+        for index in (25, 26, 27, 28, 29, 30, 31, 32):
+            body[index]["world"]["z"] += 0.025 * frame_index
+
+    report = optimize_motion(frames, fps=25.0)
+
+    feet = []
+    hips = []
+    for value in frames:
+        body = {landmark["index"]: landmark for landmark in value["body"]}
+        feet.append((world(body, 31) + world(body, 32)) * 0.5)
+        hips.append((world(body, 23) + world(body, 24)) * 0.5)
+        lateral = world(body, 24) - world(body, 23)
+        lateral /= np.linalg.norm(lateral)
+        for left, right in (((23, 25), (24, 26)), ((25, 27), (26, 28))):
+            directions = []
+            for start, end in (left, right):
+                direction = world(body, end) - world(body, start)
+                direction -= lateral * float(np.dot(direction, lateral))
+                directions.append(direction / np.linalg.norm(direction))
+            assert float(np.dot(*directions)) > 0.999999
+    assert report.root_translation is True
+    assert float(np.ptp(np.stack(feet), axis=0).max()) < 0.001
+    assert float(np.ptp(np.stack(hips), axis=0).max()) > 0.1
 
 
 def test_optimizer_regularizes_overlapping_side_view_arms_into_sagittal_plane() -> None:
@@ -157,7 +211,7 @@ def test_optimizer_regularizes_overlapping_side_view_arms_into_sagittal_plane() 
         assert abs(float(np.dot(face_center - shoulder_center, lateral))) < 1e-6
 
 
-def test_optimizer_balances_hidden_leg_width_without_flattening_sagittal_motion() -> None:
+def test_optimizer_balances_hidden_leg_width_and_sagittal_pose() -> None:
     frames = [frame(index, 1.0) for index in range(10)]
     sagittal_before: list[tuple[np.ndarray, np.ndarray]] = []
     stance_before: list[float] = []
@@ -172,6 +226,8 @@ def test_optimizer_balances_hidden_leg_width_without_flattening_sagittal_motion(
         }
         for index, position in biased_positions.items():
             body[index]["world"] = dict(zip(("x", "y", "z"), position, strict=True))
+        body[31]["x"] += 0.03 * frame_index
+        body[32]["x"] += 0.03 * frame_index
         lateral = world(body, 24) - world(body, 23)
         lateral /= np.linalg.norm(lateral)
         projected = []
@@ -197,18 +253,23 @@ def test_optimizer_balances_hidden_leg_width_without_flattening_sagittal_motion(
         stance_after.append(abs(float(np.dot(world(body, 28) - world(body, 27), lateral))))
         assert offsets[0] < 0.0 < offsets[1]
         assert abs(abs(offsets[0]) - abs(offsets[1])) < 0.04
-        for chain_index, (hip, knee) in enumerate(((23, 25), (24, 26))):
+        resolved_directions = []
+        for hip, knee in ((23, 25), (24, 26)):
             direction = world(body, knee) - world(body, hip)
             direction -= lateral * float(np.dot(direction, lateral))
             direction /= np.linalg.norm(direction)
-            assert float(np.dot(direction, before[chain_index])) > 0.999
+            resolved_directions.append(direction)
+            shared_before = before[0] + before[1]
+            shared_before /= np.linalg.norm(shared_before)
+            assert float(np.dot(direction, shared_before)) > 0.99
+        assert float(np.dot(*resolved_directions)) > 0.999999
     assert float(np.ptp(stance_after)) < float(np.ptp(stance_before)) * 0.2
 
 
 def test_optimizer_leaves_leg_spread_alone_when_body_sides_are_visible() -> None:
     frames = [frame(index, 1.0) for index in range(10)]
     directions_before: list[tuple[np.ndarray, np.ndarray]] = []
-    for value in frames:
+    for frame_index, value in enumerate(frames):
         body = {landmark["index"]: landmark for landmark in value["body"]}
         for index, image in {
             11: (0.32, 0.42),
@@ -217,6 +278,8 @@ def test_optimizer_leaves_leg_spread_alone_when_body_sides_are_visible() -> None
             24: (0.62, 0.62),
         }.items():
             body[index]["x"], body[index]["y"] = image
+        body[31]["x"] += 0.03 * frame_index
+        body[32]["x"] += 0.03 * frame_index
         directions_before.append(
             (
                 world(body, 25) - world(body, 23),

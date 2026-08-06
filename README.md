@@ -10,13 +10,14 @@ The application is intentionally local: uploaded videos, extracted landmarks, an
 - Detect one full-body pose and up to two hands per frame.
 - Fuse pose and hand landmarks into a common 3D coordinate space.
 - Auto-calibrate a symmetric skeleton from ordinary motion frames; no T-pose is required.
-- Enforce fixed bone lengths and softly stabilize likely planted hands.
+- Repair short hand occlusions with centered interpolation and smooth world-space tracks without playback lag.
+- Enforce fixed bone lengths, recover root motion from planted feet, and stabilize likely support contacts.
 - Correct side-view arm depth and bilateral symmetry when the left and right arms overlap in the source footage.
 - Treat sparse pose face landmarks as one rigid head, centering it when shoulder and hip overlap signals a side view.
 - Use one level, clip-stable shoulder/hip axis and centerline to prevent side-view torso twist and lean.
-- Keep camera-hidden leg stance width stable in side views while preserving each leg's visible forward/back motion.
+- Keep camera-hidden leg stance width stable and share the bilateral leg pose when side-view overlap makes separate leg motion unobservable.
 - Align simultaneous planted hands along the body when an oblique side view makes their depth ambiguous.
-- Preview the video overlay and either a solid articulated mannequin, the diagnostic 3D skeleton, or both on a shared timeline.
+- Preview the video overlay and either a solid articulated mannequin, the diagnostic 3D skeleton, or both on a shared timeline, with body-relative Front, Side, and Top cameras.
 - Loop playback while inspecting a reconstructed movement.
 - Mark low-confidence or held landmark observations.
 - Export canonical JSON and an experimental BVH armature animation.
@@ -65,7 +66,7 @@ For the best first results:
 
 Single-camera 3D is inferred rather than measured. Depth, contacts, and occluded joints can therefore be approximate. KineTrace exposes confidence instead of hiding that uncertainty.
 
-Automatic calibration uses robust median measurements from visible frames across the uploaded clip. Likely hand contacts are inferred from sustained low image-space motion, so an `Auto-optimized` summary lists how many were stabilized. Foot pinning is deliberately deferred until KineTrace has a root-translation and floor solve.
+Automatic calibration uses robust median measurements from visible frames across the uploaded clip. Likely hand and foot contacts are inferred from sustained low image-space motion, so an `Auto-optimized` summary lists how many were stabilized. Planted feet define a global root translation and support plane; residual limb IK handles only the small error left after that root solve.
 
 Hand tracking percentages measure the share of frames where that hand was directly detected. A hidden hand can therefore have lower coverage even when its visible detections are accurate.
 
@@ -73,7 +74,7 @@ Hand tracking percentages measure the share of frames where that hand was direct
 
 Runtime data is written under `.kinetrace/` and ignored by git. Delete that directory to remove all local source videos and generated results.
 
-- **JSON** preserves normalized image coordinates, root-relative world coordinates, landmark confidence, timestamps, and interpolation flags.
+- **JSON** preserves normalized image coordinates, contact-anchored world coordinates when support is available, landmark confidence, timestamps, and interpolation flags.
 - **BVH** contains a generic body-and-finger hierarchy in metres. It is an initial interoperability export, not yet a one-click retarget to an arbitrary character.
 
 See [Architecture](docs/architecture.md), [Capture guide](docs/capture-guide.md), and [Model governance](docs/model-governance.md) for details.

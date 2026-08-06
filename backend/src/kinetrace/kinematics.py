@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -48,11 +49,14 @@ class ContactSpec:
     chain: tuple[int, int, int]
     attachments: tuple[int, ...]
     hand_side: str | None = None
+    root_anchor: bool = False
 
 
 CONTACT_SPECS = (
     ContactSpec("left hand", 15, (11, 13, 15), (17, 19, 21), "left"),
     ContactSpec("right hand", 16, (12, 14, 16), (18, 20, 22), "right"),
+    ContactSpec("left foot", 31, (23, 25, 27), (29,), root_anchor=True),
+    ContactSpec("right foot", 32, (24, 26, 28), (30,), root_anchor=True),
 )
 
 
@@ -62,6 +66,8 @@ class ContactTrack:
     start: int
     end: int
     target: Vector
+    limb_offset: Vector | None = None
+    hand_template: dict[int, Vector] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,8 +79,11 @@ class OptimizationReport:
     arm_depth_regularization: float
     head_center_regularization: float
     leg_lateral_regularization: float
+    leg_pose_regularization: float
     torso_axis_regularization: float
     paired_hand_regularization: float
+    temporal_smoothing: bool
+    root_translation: bool
     stabilized_contacts: tuple[str, ...]
     bone_variation_before: float
     bone_variation_after: float
@@ -92,8 +101,11 @@ class OptimizationReport:
             "armDepthRegularization": value["arm_depth_regularization"],
             "headCenterRegularization": value["head_center_regularization"],
             "legLateralRegularization": value["leg_lateral_regularization"],
+            "legPoseRegularization": value["leg_pose_regularization"],
             "torsoAxisRegularization": value["torso_axis_regularization"],
             "pairedHandRegularization": value["paired_hand_regularization"],
+            "temporalSmoothing": value["temporal_smoothing"],
+            "rootTranslation": value["root_translation"],
             "stabilizedContacts": value["stabilized_contacts"],
             "boneVariationBefore": value["bone_variation_before"],
             "boneVariationAfter": value["bone_variation_after"],
@@ -109,11 +121,13 @@ def optimize_motion(frames: list[dict[str, Any]], fps: float) -> OptimizationRep
     Image-space coordinates remain untouched so the source overlay still follows the
     detector; only the 3D world reconstruction is corrected.
     """
+    _interpolate_and_smooth_world_tracks(frames, fps)
     body_lengths = _calibrate_body_lengths(frames)
     hand_lengths = _calibrate_hand_lengths(frames)
     face_template = _face_template(frames)
     arm_depth_weight = _arm_depth_weight(frames)
     body_side_weight = _body_side_view_weight(frames)
+    leg_pose_weight = body_side_weight * _leg_overlap_weight(frames)
     body_lateral_axis = _calibrate_body_lateral_axis(frames)
     leg_lateral_offset = _calibrate_leg_lateral_offset(
         frames, body_lengths, body_lateral_axis
@@ -127,6 +141,7 @@ def optimize_motion(frames: list[dict[str, Any]], fps: float) -> OptimizationRep
             face_template,
             arm_depth_weight,
             body_side_weight,
+            leg_pose_weight,
             leg_lateral_offset,
             body_lateral_axis,
         )
@@ -136,11 +151,24 @@ def optimize_motion(frames: list[dict[str, Any]], fps: float) -> OptimizationRep
     paired_hand_weight = _align_paired_hand_contacts(
         tracks, body_lateral_axis, body_side_weight
     )
+    _align_paired_foot_contacts(tracks, body_lateral_axis, leg_pose_weight)
     before_contact_drift = _contact_drift(frames, tracks)
     for frame_index, frame in enumerate(frames):
         active = [track for track in tracks if track.start <= frame_index <= track.end]
-        _apply_contacts(frame, active, body_lengths)
-        _constrain_hands(frame, hand_lengths)
+        for _ in range(3):
+            _apply_root_contacts(
+                frame, active, body_lateral_axis, leg_pose_weight
+            )
+            _apply_foot_contacts(
+                frame,
+                active,
+                body_lengths,
+                body_lateral_axis,
+                leg_pose_weight,
+            )
+            _apply_contacts(frame, active, body_lengths)
+            _constrain_hands(frame, hand_lengths)
+        _apply_hand_contact_templates(frame, active)
 
     return OptimizationReport(
         method="automatic robust kinematic constraints",
@@ -150,14 +178,129 @@ def optimize_motion(frames: list[dict[str, Any]], fps: float) -> OptimizationRep
         arm_depth_regularization=arm_depth_weight,
         head_center_regularization=body_side_weight,
         leg_lateral_regularization=body_side_weight,
+        leg_pose_regularization=leg_pose_weight,
         torso_axis_regularization=body_side_weight,
         paired_hand_regularization=paired_hand_weight,
+        temporal_smoothing=True,
+        root_translation=bool(tracks),
         stabilized_contacts=tuple(dict.fromkeys(track.spec.label for track in tracks)),
         bone_variation_before=before_variation,
         bone_variation_after=_bone_variation(frames),
         contact_drift_before_meters=before_contact_drift,
         contact_drift_after_meters=_contact_drift(frames, tracks),
     )
+
+
+def _interpolate_and_smooth_world_tracks(
+    frames: list[dict[str, Any]], fps: float
+) -> None:
+    """Repair short occlusions and apply a centered, zero-lag world-space filter."""
+    if len(frames) < 3:
+        return
+    radius = int(np.clip(round(fps * 0.08), 1, 3))
+    maximum_gap = max(int(round(fps * 0.45)), 2)
+    groups = (("body", 0.45), ("left", 0.5), ("right", 0.5))
+
+    for group, confidence_threshold in groups:
+        point_maps = [
+            _point_map(
+                frame.get("body", [])
+                if group == "body"
+                else frame.get("hands", {}).get(group, [])
+            )
+            for frame in frames
+        ]
+        indices = sorted({index for points in point_maps for index in points})
+        for landmark_index in indices:
+            points = [values.get(landmark_index) for values in point_maps]
+            reliable = np.array(
+                [
+                    point is not None
+                    and not point.get("inferred", False)
+                    and float(point.get("confidence", 0.0)) >= confidence_threshold
+                    for point in points
+                ],
+                dtype=bool,
+            )
+            reliable_indices = np.flatnonzero(reliable)
+            if not len(reliable_indices):
+                continue
+
+            world_values = np.full((len(frames), 3), np.nan, dtype=float)
+            image_values = np.full((len(frames), 3), np.nan, dtype=float)
+            for frame_index in reliable_indices:
+                point = points[frame_index]
+                assert point is not None
+                world_values[frame_index] = _world(point)
+                image_values[frame_index] = [
+                    float(point[axis]) for axis in ("x", "y", "z")
+                ]
+
+            resolved = reliable.copy()
+            for left, right in zip(
+                reliable_indices[:-1], reliable_indices[1:], strict=True
+            ):
+                gap = int(right - left - 1)
+                if gap <= 0 or gap > maximum_gap:
+                    continue
+                for frame_index in range(int(left) + 1, int(right)):
+                    amount = (frame_index - left) / (right - left)
+                    world_values[frame_index] = (
+                        world_values[left] * (1.0 - amount)
+                        + world_values[right] * amount
+                    )
+                    image_values[frame_index] = (
+                        image_values[left] * (1.0 - amount)
+                        + image_values[right] * amount
+                    )
+                    point = points[frame_index]
+                    if point is None:
+                        template = points[left] or points[right]
+                        assert template is not None
+                        point = deepcopy(template)
+                        target = (
+                            frames[frame_index]["body"]
+                            if group == "body"
+                            else frames[frame_index]["hands"][group]
+                        )
+                        target.append(point)
+                        point_maps[frame_index][landmark_index] = point
+                        points[frame_index] = point
+                    point["inferred"] = True
+                    point["confidence"] = 0.0
+                    resolved[frame_index] = True
+
+            filtered = world_values.copy()
+            for frame_index in np.flatnonzero(resolved):
+                start = max(int(frame_index) - radius, 0)
+                end = min(int(frame_index) + radius + 1, len(frames))
+                neighbours = np.flatnonzero(resolved[start:end]) + start
+                if not len(neighbours):
+                    continue
+                weights = np.array(
+                    [radius + 1 - abs(int(value) - int(frame_index)) for value in neighbours],
+                    dtype=float,
+                )
+                filtered[frame_index] = np.average(
+                    world_values[neighbours], axis=0, weights=weights
+                )
+
+            for frame_index in np.flatnonzero(resolved):
+                point = points[frame_index]
+                assert point is not None
+                _set_world(point, filtered[frame_index])
+                if not reliable[frame_index]:
+                    point["x"], point["y"], point["z"] = map(
+                        float, image_values[frame_index]
+                    )
+
+        for frame in frames:
+            target = (
+                frame["body"]
+                if group == "body"
+                else frame["hands"][group]
+            )
+            target.sort(key=lambda point: int(point["index"]))
 
 
 def _point_map(points: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
@@ -303,6 +446,32 @@ def _body_side_view_weight(frames: list[dict[str, Any]]) -> float:
     return weight * weight * (3.0 - 2.0 * weight)
 
 
+def _leg_overlap_weight(frames: list[dict[str, Any]]) -> float:
+    """Estimate when separate left/right leg motion is hidden by camera overlap."""
+    overlap_ratios: list[float] = []
+    for frame in frames:
+        body = _point_map(frame.get("body", []))
+        if not all(index in body for index in (25, 26, 27, 28)):
+            continue
+        visible_y = [float(point["y"]) for point in body.values()]
+        body_height = max(visible_y) - min(visible_y)
+        if body_height < 0.05:
+            continue
+        separations = [
+            np.linalg.norm(
+                np.array([body[left]["x"], body[left]["y"]])
+                - np.array([body[right]["x"], body[right]["y"]])
+            )
+            for left, right in ((25, 26), (27, 28))
+        ]
+        overlap_ratios.append(float(np.mean(separations) / body_height))
+    if not overlap_ratios:
+        return 0.0
+    median_ratio = float(np.median(overlap_ratios))
+    weight = float(np.clip((0.20 - median_ratio) / (0.20 - 0.12), 0.0, 1.0))
+    return weight * weight * (3.0 - 2.0 * weight)
+
+
 def _calibrate_body_lateral_axis(frames: list[dict[str, Any]]) -> Vector:
     """Find one horizontal left-to-right body axis across reliable clip frames."""
     axes: list[Vector] = []
@@ -386,6 +555,7 @@ def _constrain_body(
     face_template: Vector | None,
     arm_depth_weight: float,
     body_side_weight: float,
+    leg_pose_weight: float,
     leg_lateral_offset: float,
     body_lateral_axis: Vector,
 ) -> None:
@@ -465,7 +635,13 @@ def _constrain_body(
     )
     thigh_directions = [_unit(raw[knee] - raw[hip]) for hip, knee, *_ in leg_chains]
     shin_directions = [_unit(raw[ankle] - raw[knee]) for _, knee, ankle, *_ in leg_chains]
-    leg_balance_weight = body_side_weight * 0.9
+    thigh_directions = _regularize_bilateral_sagittal_directions(
+        thigh_directions, hip_axis, leg_pose_weight
+    )
+    shin_directions = _regularize_bilateral_sagittal_directions(
+        shin_directions, hip_axis, leg_pose_weight
+    )
+    leg_balance_weight = body_side_weight
     thigh_directions, shin_directions = _stabilize_leg_lateral_directions(
         thigh_directions,
         shin_directions,
@@ -475,13 +651,19 @@ def _constrain_body(
         leg_lateral_offset,
         leg_balance_weight,
     )
+    foot_directions = [
+        _unit(raw[foot] - raw[ankle]) for _, _, ankle, foot, _ in leg_chains
+    ]
+    foot_directions = _regularize_bilateral_sagittal_directions(
+        foot_directions, hip_axis, leg_pose_weight
+    )
     for chain_index, (hip, knee, ankle, foot, heel) in enumerate(leg_chains):
         knee_value = hips[hip] + thigh_directions[chain_index] * lengths["thigh"]
         ankle_value = knee_value + shin_directions[chain_index] * lengths["shin"]
         _set_world(body[knee], knee_value)
         _set_world(body[ankle], ankle_value)
         if foot in body:
-            foot_value = ankle_value + _unit(raw[foot] - raw[ankle]) * lengths["foot"]
+            foot_value = ankle_value + foot_directions[chain_index] * lengths["foot"]
             _set_world(body[foot], foot_value)
         if heel in body:
             _set_world(body[heel], raw[heel] + ankle_value - raw[ankle])
@@ -517,6 +699,26 @@ def _blend_optional_shared_direction(
     source: Vector, shared: Vector | None, weight: float
 ) -> Vector:
     return source if shared is None else _blend_direction(source, shared, weight)
+
+
+def _regularize_bilateral_sagittal_directions(
+    directions: list[Vector], lateral_axis: Vector, weight: float
+) -> list[Vector]:
+    if weight <= 0.0:
+        return directions
+    sagittal = [_project_to_sagittal(direction, lateral_axis) for direction in directions]
+    shared = _shared_direction(sagittal)
+    if shared is None:
+        return directions
+    resolved: list[Vector] = []
+    for direction, sagittal_direction in zip(directions, sagittal, strict=True):
+        lateral = float(np.clip(np.dot(direction, lateral_axis), -0.95, 0.95))
+        target = _blend_direction(sagittal_direction, shared, weight)
+        resolved.append(
+            target * float(np.sqrt(max(1.0 - lateral * lateral, 0.0)))
+            + lateral_axis * lateral
+        )
+    return resolved
 
 
 def _stabilize_leg_lateral_directions(
@@ -652,7 +854,7 @@ def _detect_contacts(frames: list[dict[str, Any]], fps: float) -> list[ContactTr
                 continue
             point = body[spec.point_index]
             points[frame_index] = [point["x"], point["y"]]
-            valid[frame_index] = _usable(point)
+            valid[frame_index] = _contact_usable(point, spec)
         if int(valid.sum()) < minimum_frames:
             continue
         if spec.hand_side and not _hand_is_near_support_plane(frames, spec.point_index, valid):
@@ -679,7 +881,7 @@ def _detect_contacts(frames: list[dict[str, Any]], fps: float) -> list[ContactTr
             and float(np.median(finite_speeds)) <= 0.04
         )
         if clip_stationary:
-            tracks.append(ContactTrack(spec, 0, len(frames) - 1, np.zeros(2)))
+            tracks.append(ContactTrack(spec, 0, len(frames) - 1, np.zeros(3)))
             continue
 
         stationary = valid & (speeds <= 0.055)
@@ -687,17 +889,55 @@ def _detect_contacts(frames: list[dict[str, Any]], fps: float) -> list[ContactTr
         stationary = _close_short_gaps(stationary, max(int(round(fps * 0.12)), 1))
         for start, end in _true_runs(stationary):
             if end - start + 1 >= minimum_frames:
-                tracks.append(ContactTrack(spec, start, end, np.zeros(2)))
+                tracks.append(ContactTrack(spec, start, end, np.zeros(3)))
 
     for track in tracks:
         values = []
+        offsets = []
         for frame in frames[track.start : track.end + 1]:
             body = _point_map(frame.get("body", []))
-            if track.spec.point_index in body:
+            if (
+                track.spec.point_index in body
+                and _contact_usable(body[track.spec.point_index], track.spec)
+            ):
                 point = _world(body[track.spec.point_index])
-                values.append(point[[0, 2]])
+                values.append(point)
+                if track.spec.root_anchor:
+                    end = track.spec.chain[2]
+                    if end in body:
+                        offsets.append(point - _world(body[end]))
         if values:
             track.target[:] = np.median(np.stack(values), axis=0)
+        if offsets:
+            median_offset = np.median(np.stack(offsets), axis=0)
+            median_length = float(
+                np.median([np.linalg.norm(offset) for offset in offsets])
+            )
+            track.limb_offset = _unit(median_offset, offsets[0]) * median_length
+        if track.spec.hand_side:
+            candidates = []
+            for frame in frames[track.start : track.end + 1]:
+                hand = _point_map(
+                    frame.get("hands", {}).get(track.spec.hand_side, [])
+                )
+                if 0 not in hand:
+                    continue
+                reliable = [
+                    point
+                    for point in hand.values()
+                    if not point.get("inferred", False)
+                ]
+                if not reliable:
+                    continue
+                score = float(
+                    np.mean([point.get("confidence", 0.0) for point in reliable])
+                )
+                root = _world(hand[0])
+                candidates.append(
+                    (score, {index: _world(point) - root for index, point in hand.items()})
+                )
+            if candidates:
+                track.hand_template = max(candidates, key=lambda value: value[0])[1]
     return tracks
 
 
@@ -725,15 +965,114 @@ def _align_paired_hand_contacts(
         _, right_index, right = max(candidates, key=lambda value: value[0])
         used_right.add(right_index)
         forward_values = [
-            float(np.dot(track.target, ground_forward)) for track in (left, right)
+            float(np.dot(track.target[[0, 2]], ground_forward))
+            for track in (left, right)
         ]
         shared_forward = float(np.mean(forward_values))
         for track, forward_value in zip(
             (left, right), forward_values, strict=True
         ):
-            track.target += ground_forward * (shared_forward - forward_value) * weight
+            track.target[[0, 2]] += (
+                ground_forward * (shared_forward - forward_value) * weight
+            )
         aligned = True
     return weight if aligned else 0.0
+
+
+def _align_paired_foot_contacts(
+    tracks: list[ContactTrack], lateral_axis: Vector, weight: float
+) -> None:
+    if weight <= 0.0:
+        return
+    left_tracks = [track for track in tracks if track.spec.label == "left foot"]
+    right_tracks = [track for track in tracks if track.spec.label == "right foot"]
+    ground_lateral = _unit(lateral_axis[[0, 2]])
+    ground_forward = np.array([-ground_lateral[1], ground_lateral[0]], dtype=float)
+    for left in left_tracks:
+        candidates = [
+            right
+            for right in right_tracks
+            if min(left.end, right.end) - max(left.start, right.start) + 1 >= 5
+        ]
+        if not candidates:
+            continue
+        right = max(
+            candidates,
+            key=lambda value: min(left.end, value.end) - max(left.start, value.start),
+        )
+        shared_forward = float(
+            np.mean(
+                [
+                    np.dot(left.target[[0, 2]], ground_forward),
+                    np.dot(right.target[[0, 2]], ground_forward),
+                ]
+            )
+        )
+        shared_height = float(np.mean([left.target[1], right.target[1]]))
+        for track in (left, right):
+            current_forward = float(np.dot(track.target[[0, 2]], ground_forward))
+            track.target[[0, 2]] += (
+                ground_forward * (shared_forward - current_forward) * weight
+            )
+            track.target[1] += (shared_height - track.target[1]) * weight
+
+        if left.limb_offset is None or right.limb_offset is None:
+            continue
+        offset_lengths = {
+            id(track): float(np.linalg.norm(track.limb_offset))
+            for track in (left, right)
+            if track.limb_offset is not None
+        }
+        shared_offset_forward = float(
+            np.mean(
+                [
+                    np.dot(left.limb_offset[[0, 2]], ground_forward),
+                    np.dot(right.limb_offset[[0, 2]], ground_forward),
+                ]
+            )
+        )
+        shared_offset_height = float(
+            np.mean([left.limb_offset[1], right.limb_offset[1]])
+        )
+        lateral_offsets = [
+            float(np.dot(track.limb_offset[[0, 2]], ground_lateral))
+            for track in (left, right)
+        ]
+        shared_offset_lateral = float(np.mean(np.abs(lateral_offsets)))
+        for track, lateral_sign in zip(
+            (left, right), (-1.0, 1.0), strict=True
+        ):
+            assert track.limb_offset is not None
+            current_forward = float(
+                np.dot(track.limb_offset[[0, 2]], ground_forward)
+            )
+            track.limb_offset[[0, 2]] += (
+                ground_forward
+                * (shared_offset_forward - current_forward)
+                * weight
+            )
+            track.limb_offset[1] += (
+                shared_offset_height - track.limb_offset[1]
+            ) * weight
+            current_lateral = float(
+                np.dot(track.limb_offset[[0, 2]], ground_lateral)
+            )
+            track.limb_offset[[0, 2]] += (
+                ground_lateral
+                * (lateral_sign * shared_offset_lateral - current_lateral)
+                * weight
+            )
+            track.limb_offset[:] = (
+                _unit(track.limb_offset) * offset_lengths[id(track)]
+            )
+
+
+def _contact_usable(point: dict[str, Any], spec: ContactSpec) -> bool:
+    threshold = 0.35 if spec.root_anchor else 0.55
+    return (
+        not point.get("inferred", False)
+        and float(point.get("confidence", 0.0)) >= threshold
+    )
 
 
 def _hand_is_near_support_plane(
@@ -789,19 +1128,126 @@ def _true_runs(values: np.ndarray) -> list[tuple[int, int]]:
     return runs
 
 
+def _apply_root_contacts(
+    frame: dict[str, Any],
+    tracks: list[ContactTrack],
+    lateral_axis: Vector,
+    leg_pose_weight: float,
+) -> None:
+    body = _point_map(frame.get("body", []))
+    offsets = []
+    for track in tracks:
+        if track.spec.point_index not in body:
+            continue
+        offset = track.target - _world(body[track.spec.point_index])
+        offsets.extend([offset] * (3 if track.spec.root_anchor else 1))
+    if not offsets:
+        return
+    translation = np.median(np.stack(offsets), axis=0)
+    feet = [track for track in tracks if track.spec.root_anchor]
+    if len(feet) >= 2 and all(index in body for index in (23, 24)):
+        foot_center = np.mean([track.target for track in feet], axis=0)
+        hip_center = (_world(body[23]) + _world(body[24])) * 0.5 + translation
+        ground_lateral = _unit(lateral_axis[[0, 2]])
+        lateral_offset = float(
+            np.dot(foot_center[[0, 2]] - hip_center[[0, 2]], ground_lateral)
+        )
+        translation[[0, 2]] += (
+            ground_lateral * lateral_offset * leg_pose_weight
+        )
+    for point in frame.get("body", []):
+        _set_world(point, _world(point) + translation)
+    for hand in frame.get("hands", {}).values():
+        for point in hand:
+            _set_world(point, _world(point) + translation)
+
+
+def _apply_hand_contact_templates(
+    frame: dict[str, Any], tracks: list[ContactTrack]
+) -> None:
+    body = _point_map(frame.get("body", []))
+    for track in tracks:
+        side = track.spec.hand_side
+        template = track.hand_template
+        if not side or template is None or track.spec.point_index not in body:
+            continue
+        hand = _point_map(frame.get("hands", {}).get(side, []))
+        wrist = _world(body[track.spec.point_index])
+        for index, offset in template.items():
+            if index in hand:
+                _set_world(hand[index], wrist + offset)
+
+
+def _apply_foot_contacts(
+    frame: dict[str, Any],
+    tracks: list[ContactTrack],
+    lengths: dict[str, float],
+    lateral_axis: Vector,
+    sagittal_weight: float,
+) -> None:
+    body = _point_map(frame.get("body", []))
+    for track in tracks:
+        spec = track.spec
+        if not spec.root_anchor or not all(index in body for index in spec.chain):
+            continue
+        if spec.point_index not in body:
+            continue
+        start, middle, end = spec.chain
+        raw_end = _world(body[end])
+        foot_offset = (
+            track.limb_offset
+            if track.limb_offset is not None
+            else _world(body[spec.point_index]) - raw_end
+        )
+        desired_end = track.target - foot_offset
+        raw_middle = _world(body[middle])
+        bend_direction = None
+        if sagittal_weight > 0.0:
+            reach_axis = _unit(desired_end - _world(body[start]))
+            sagittal_bend = _unit(np.cross(lateral_axis, reach_axis))
+            raw_bend = raw_middle - (
+                _world(body[start])
+                + reach_axis
+                * float(np.dot(raw_middle - _world(body[start]), reach_axis))
+            )
+            if float(np.dot(sagittal_bend, raw_bend)) < 0.0:
+                sagittal_bend = -sagittal_bend
+            bend_direction = _blend_direction(
+                _unit(raw_bend, sagittal_bend),
+                sagittal_bend,
+                sagittal_weight,
+            )
+        solved_middle, solved_end = _solve_two_bone(
+            _world(body[start]),
+            raw_middle,
+            desired_end,
+            lengths["thigh"],
+            lengths["shin"],
+            bend_direction,
+        )
+        _set_world(body[middle], solved_middle)
+        _set_world(body[end], solved_end)
+        _set_world(body[spec.point_index], solved_end + foot_offset)
+        delta = solved_end - raw_end
+        for attached in spec.attachments:
+            if attached in body:
+                _set_world(body[attached], _world(body[attached]) + delta)
+
+
 def _apply_contacts(
     frame: dict[str, Any], tracks: list[ContactTrack], lengths: dict[str, float]
 ) -> None:
     body = _point_map(frame.get("body", []))
     for track in tracks:
         spec = track.spec
+        if spec.root_anchor:
+            continue
         start, middle, end = spec.chain
         if not all(index in body for index in spec.chain) or spec.point_index not in body:
             continue
         raw_end = _world(body[end])
         contact = _world(body[spec.point_index])
-        desired_contact = contact.copy()
-        desired_contact[[0, 2]] = track.target
+        desired_contact = track.target
         desired_end = raw_end + desired_contact - contact
         first_length = lengths["upperArm"]
         second_length = lengths["forearm"]
@@ -818,7 +1264,12 @@ def _apply_contacts(
 
 
 def _solve_two_bone(
-    start: Vector, raw_middle: Vector, desired_end: Vector, first: float, second: float
+    start: Vector,
+    raw_middle: Vector,
+    desired_end: Vector,
+    first: float,
+    second: float,
+    bend_direction: Vector | None = None,
 ) -> tuple[Vector, Vector]:
     reach = desired_end - start
     distance = float(np.linalg.norm(reach))
@@ -831,7 +1282,11 @@ def _solve_two_bone(
         2.0 * resolved_distance
     )
     height = float(np.sqrt(max(first * first - along * along, 0.0)))
-    raw_plane = raw_middle - (start + axis * float(np.dot(raw_middle - start, axis)))
+    raw_plane = (
+        bend_direction
+        if bend_direction is not None
+        else raw_middle - (start + axis * float(np.dot(raw_middle - start, axis)))
+    )
     if float(np.linalg.norm(raw_plane)) < 1e-6:
         reference = np.array([0.0, 1.0, 0.0], dtype=float)
         if abs(float(np.dot(reference, axis))) > 0.9:
@@ -863,7 +1318,7 @@ def _contact_drift(frames: list[dict[str, Any]], tracks: list[ContactTrack]) -> 
         for frame in frames[track.start : track.end + 1]:
             body = _point_map(frame.get("body", []))
             if track.spec.point_index in body:
-                values.append(_world(body[track.spec.point_index])[[0, 2]])
+                values.append(_world(body[track.spec.point_index]))
         if len(values) > 1:
             points = np.stack(values)
             drifts.append(float(np.linalg.norm(np.ptp(points, axis=0))))

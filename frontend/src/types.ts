@@ -43,8 +43,11 @@ export type MotionResult = {
       armDepthRegularization?: number
       headCenterRegularization?: number
       legLateralRegularization?: number
+      legPoseRegularization?: number
       torsoAxisRegularization?: number
       pairedHandRegularization?: number
+      temporalSmoothing?: boolean
+      rootTranslation?: boolean
       stabilizedContacts: string[]
       boneVariationBefore: number
       boneVariationAfter: number
