@@ -35,6 +35,17 @@ export type MotionResult = {
     durationMs: number
     coordinateSpace: string
     handAssignment: string
+    optimization?: {
+      method: string
+      calibration: string
+      fixedBoneLengths: boolean
+      rigidHead: boolean
+      stabilizedContacts: string[]
+      boneVariationBefore: number
+      boneVariationAfter: number
+      contactDriftBeforeMeters: number
+      contactDriftAfterMeters: number
+    }
   }
   skeleton: {
     bodyLandmarks: string[]

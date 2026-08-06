@@ -10,7 +10,7 @@ def test_health_reports_local_engine() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.1.0"
+    assert payload["version"] == "0.2.0"
     assert set(payload["models"]) == {"pose", "hands"}
 
 

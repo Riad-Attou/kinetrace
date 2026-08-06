@@ -10,6 +10,10 @@
 
 For push-ups, place the camera around hip height and use a side or shallow three-quarter angle. A pure front view creates more left/right overlap and depth ambiguity.
 
+## Existing internet footage
+
+A T-pose or known body measurement is not required. KineTrace estimates one robust skeleton from the visible motion in the complete clip. When choosing among available videos, prefer a fixed camera, limited cuts, a complete body, and an elevated three-quarter view where the two wrists do not overlap. Trim title cards and unrelated shots before processing so they do not influence automatic calibration.
+
 ## Hand limitations
 
 Full-body framing makes hands small. When the hand model loses a hand, KineTrace may briefly hold the previous pose and labels those points as inferred. Longer gaps remain missing rather than creating arbitrary finger motion.

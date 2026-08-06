@@ -8,6 +8,7 @@ import mediapipe as mp
 
 from kinetrace.bvh import export_bvh
 from kinetrace.jobs import JobStore
+from kinetrace.kinematics import optimize_motion
 from kinetrace.landmarks import (
     BODY_CONNECTIONS,
     HAND_CONNECTIONS,
@@ -119,9 +120,11 @@ def process_video(job_id: str, store: JobStore) -> None:
         if not frames or pose_frame_count == 0:
             raise ValueError("No full-body pose was detected in the video.")
 
+        store.update(job_id, progress=0.86, stage="Auto-calibrating skeleton and contacts")
+        optimization = optimize_motion(frames, fps)
         actual_duration = frames[-1]["timestampMs"] if len(frames) > 1 else duration_ms
         result = {
-            "schemaVersion": "0.1.0",
+            "schemaVersion": "0.2.0",
             "metadata": {
                 "sourceFilename": record.filename,
                 "width": width,
@@ -129,8 +132,9 @@ def process_video(job_id: str, store: JobStore) -> None:
                 "fps": fps,
                 "frameCount": len(frames),
                 "durationMs": actual_duration,
-                "coordinateSpace": "MediaPipe root-relative world metres",
+                "coordinateSpace": "Auto-constrained MediaPipe root-relative world metres",
                 "handAssignment": "nearest pose wrist",
+                "optimization": optimization.to_json(),
             },
             "skeleton": {
                 "bodyLandmarks": list(POSE_LANDMARK_NAMES),
