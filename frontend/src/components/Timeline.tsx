@@ -1,4 +1,4 @@
-import { Pause, Play } from 'lucide-react'
+import { Pause, Play, Repeat2 } from 'lucide-react'
 import type { CSSProperties } from 'react'
 
 import { formatTime } from '../utils'
@@ -7,11 +7,21 @@ type TimelineProps = {
   currentMs: number
   durationMs: number
   playing: boolean
+  looping: boolean
   onToggle: () => void
+  onToggleLoop: () => void
   onSeek: (milliseconds: number) => void
 }
 
-export function Timeline({ currentMs, durationMs, playing, onToggle, onSeek }: TimelineProps) {
+export function Timeline({
+  currentMs,
+  durationMs,
+  playing,
+  looping,
+  onToggle,
+  onToggleLoop,
+  onSeek,
+}: TimelineProps) {
   const progress = durationMs > 0 ? Math.min((currentMs / durationMs) * 100, 100) : 0
   return (
     <div className="timeline-panel">
@@ -31,6 +41,16 @@ export function Timeline({ currentMs, durationMs, playing, onToggle, onSeek }: T
         />
       </div>
       <span className="timecode muted">{formatTime(durationMs)}</span>
+      <button
+        className={`loop-button ${looping ? 'active' : ''}`}
+        type="button"
+        onClick={onToggleLoop}
+        aria-label={looping ? 'Disable loop' : 'Enable loop'}
+        aria-pressed={looping}
+        title={looping ? 'Loop enabled' : 'Loop disabled'}
+      >
+        <Repeat2 size={17} />
+      </button>
     </div>
   )
 }

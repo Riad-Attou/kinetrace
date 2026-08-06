@@ -34,6 +34,7 @@ export type MotionResult = {
     frameCount: number
     durationMs: number
     coordinateSpace: string
+    handAssignment: string
   }
   skeleton: {
     bodyLandmarks: string[]
@@ -45,6 +46,8 @@ export type MotionResult = {
     poseCoverage: number
     leftHandCoverage: number
     rightHandCoverage: number
+    leftHandUsableCoverage: number
+    rightHandUsableCoverage: number
     averageBodyConfidence: number
   }
   frames: MotionFrame[]

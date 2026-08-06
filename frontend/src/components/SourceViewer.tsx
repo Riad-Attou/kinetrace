@@ -8,6 +8,7 @@ type SourceViewerProps = {
   bodyConnections: [number, number][]
   handConnections: [number, number][]
   videoRef: RefObject<HTMLVideoElement | null>
+  looping: boolean
   onPlayState: (playing: boolean) => void
 }
 
@@ -23,6 +24,7 @@ export function SourceViewer({
   bodyConnections,
   handConnections,
   videoRef,
+  looping,
   onPlayState,
 }: SourceViewerProps) {
   useEffect(() => {
@@ -57,6 +59,7 @@ export function SourceViewer({
         src={source}
         preload="metadata"
         playsInline
+        loop={looping}
         onPlay={() => onPlayState(true)}
         onPause={() => onPlayState(false)}
         onEnded={() => onPlayState(false)}

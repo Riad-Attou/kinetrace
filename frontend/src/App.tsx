@@ -36,6 +36,7 @@ function App() {
   const [submitting, setSubmitting] = useState(false)
   const [currentMs, setCurrentMs] = useState(0)
   const [playing, setPlaying] = useState(false)
+  const [looping, setLooping] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
 
   useEffect(() => {
@@ -110,6 +111,7 @@ function App() {
     setError(null)
     setCurrentMs(0)
     setPlaying(false)
+    setLooping(false)
   }
 
   const togglePlayback = () => {
@@ -165,9 +167,11 @@ function App() {
             currentFrame={currentFrame}
             currentMs={currentMs}
             playing={playing}
+            looping={looping}
             videoRef={videoRef}
             onPlayState={setPlaying}
             onToggle={togglePlayback}
+            onToggleLoop={() => setLooping((value) => !value)}
             onSeek={seek}
             onReset={reset}
           />
@@ -309,9 +313,11 @@ type StudioProps = {
   currentFrame: ReturnType<typeof nearestFrame>
   currentMs: number
   playing: boolean
+  looping: boolean
   videoRef: React.RefObject<HTMLVideoElement | null>
   onPlayState: (playing: boolean) => void
   onToggle: () => void
+  onToggleLoop: () => void
   onSeek: (milliseconds: number) => void
   onReset: () => void
 }
@@ -322,9 +328,11 @@ function Studio({
   currentFrame,
   currentMs,
   playing,
+  looping,
   videoRef,
   onPlayState,
   onToggle,
+  onToggleLoop,
   onSeek,
   onReset,
 }: StudioProps) {
@@ -345,8 +353,8 @@ function Studio({
 
       <div className="quality-row">
         <QualityCard icon={<Activity />} label="Body coverage" value={quality.poseCoverage} />
-        <QualityCard icon={<Fingerprint />} label="Left hand" value={quality.leftHandCoverage} />
-        <QualityCard icon={<Fingerprint />} label="Right hand" value={quality.rightHandCoverage} />
+        <QualityCard icon={<Fingerprint />} label="Left hand tracked" value={quality.leftHandCoverage} />
+        <QualityCard icon={<Fingerprint />} label="Right hand tracked" value={quality.rightHandCoverage} />
         <QualityCard icon={<Gauge />} label="Body confidence" value={quality.averageBodyConfidence} />
       </div>
 
@@ -357,6 +365,7 @@ function Studio({
           bodyConnections={motion.skeleton.bodyConnections}
           handConnections={motion.skeleton.handConnections}
           videoRef={videoRef}
+          looping={looping}
           onPlayState={onPlayState}
         />
         <SkeletonViewport
@@ -369,13 +378,15 @@ function Studio({
         currentMs={currentMs}
         durationMs={motion.metadata.durationMs}
         playing={playing}
+        looping={looping}
         onToggle={onToggle}
+        onToggleLoop={onToggleLoop}
         onSeek={onSeek}
       />
       <div className="studio-footnote">
         <span><i className="confidence-good" /> Reliable</span>
         <span><i className="confidence-held" /> Low confidence / temporarily held</span>
-        <p>Root-relative reconstruction · single-camera depth is inferred</p>
+        <p>Hand percentages are directly detected frames · single-camera depth is inferred</p>
       </div>
     </div>
   )
