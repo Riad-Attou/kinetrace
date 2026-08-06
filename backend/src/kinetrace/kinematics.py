@@ -73,6 +73,7 @@ class OptimizationReport:
     arm_depth_regularization: float
     head_center_regularization: float
     leg_lateral_regularization: float
+    torso_axis_regularization: float
     stabilized_contacts: tuple[str, ...]
     bone_variation_before: float
     bone_variation_after: float
@@ -90,6 +91,7 @@ class OptimizationReport:
             "armDepthRegularization": value["arm_depth_regularization"],
             "headCenterRegularization": value["head_center_regularization"],
             "legLateralRegularization": value["leg_lateral_regularization"],
+            "torsoAxisRegularization": value["torso_axis_regularization"],
             "stabilizedContacts": value["stabilized_contacts"],
             "boneVariationBefore": value["bone_variation_before"],
             "boneVariationAfter": value["bone_variation_after"],
@@ -110,7 +112,10 @@ def optimize_motion(frames: list[dict[str, Any]], fps: float) -> OptimizationRep
     face_template = _face_template(frames)
     arm_depth_weight = _arm_depth_weight(frames)
     body_side_weight = _body_side_view_weight(frames)
-    leg_lateral_offset = _calibrate_leg_lateral_offset(frames, body_lengths)
+    body_lateral_axis = _calibrate_body_lateral_axis(frames)
+    leg_lateral_offset = _calibrate_leg_lateral_offset(
+        frames, body_lengths, body_lateral_axis
+    )
     before_variation = _bone_variation(frames)
 
     for frame in frames:
@@ -121,6 +126,7 @@ def optimize_motion(frames: list[dict[str, Any]], fps: float) -> OptimizationRep
             arm_depth_weight,
             body_side_weight,
             leg_lateral_offset,
+            body_lateral_axis,
         )
         _constrain_hands(frame, hand_lengths)
 
@@ -139,6 +145,7 @@ def optimize_motion(frames: list[dict[str, Any]], fps: float) -> OptimizationRep
         arm_depth_regularization=arm_depth_weight,
         head_center_regularization=body_side_weight,
         leg_lateral_regularization=body_side_weight,
+        torso_axis_regularization=body_side_weight,
         stabilized_contacts=tuple(dict.fromkeys(track.spec.label for track in tracks)),
         bone_variation_before=before_variation,
         bone_variation_after=_bone_variation(frames),
@@ -290,8 +297,38 @@ def _body_side_view_weight(frames: list[dict[str, Any]]) -> float:
     return weight * weight * (3.0 - 2.0 * weight)
 
 
+def _calibrate_body_lateral_axis(frames: list[dict[str, Any]]) -> Vector:
+    """Find one horizontal left-to-right body axis across reliable clip frames."""
+    axes: list[Vector] = []
+    for frame in frames:
+        body = _point_map(frame.get("body", []))
+        for left, right in ((11, 12), (23, 24)):
+            if not (
+                left in body
+                and right in body
+                and _usable(body[left])
+                and _usable(body[right])
+            ):
+                continue
+            axis = _world(body[right]) - _world(body[left])
+            axis[1] = 0.0
+            if float(np.linalg.norm(axis)) <= 1e-8:
+                continue
+            axis = _unit(axis)
+            if axes and float(np.dot(axis, axes[0])) < 0.0:
+                axis = -axis
+            axes.append(axis)
+    if not axes:
+        return np.array([1.0, 0.0, 0.0], dtype=float)
+    lateral_axis = np.median(np.stack(axes), axis=0)
+    lateral_axis[1] = 0.0
+    return _unit(lateral_axis, axes[0])
+
+
 def _calibrate_leg_lateral_offset(
-    frames: list[dict[str, Any]], lengths: dict[str, float]
+    frames: list[dict[str, Any]],
+    lengths: dict[str, float],
+    lateral_axis: Vector,
 ) -> float:
     """Estimate one robust stance half-width before per-frame constraints are applied."""
     stance_widths: list[float] = []
@@ -302,7 +339,6 @@ def _calibrate_leg_lateral_offset(
             for index in (23, 24, 25, 26, 27, 28)
         ):
             continue
-        lateral_axis = _unit(_world(body[24]) - _world(body[23]))
         offsets: list[float] = []
         for hip, knee, ankle in ((23, 25, 27), (24, 26, 28)):
             thigh = _unit(_world(body[knee]) - _world(body[hip]))
@@ -326,6 +362,7 @@ def _constrain_body(
     arm_depth_weight: float,
     body_side_weight: float,
     leg_lateral_offset: float,
+    body_lateral_axis: Vector,
 ) -> None:
     body = _point_map(frame.get("body", []))
     required = (11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28)
@@ -334,7 +371,8 @@ def _constrain_body(
     raw = {index: _world(point).copy() for index, point in body.items()}
 
     hip_center = (raw[23] + raw[24]) * 0.5
-    hip_axis = _unit(raw[24] - raw[23])
+    raw_hip_axis = _unit(raw[24] - raw[23])
+    hip_axis = _blend_direction(raw_hip_axis, body_lateral_axis, body_side_weight)
     hips = {
         23: hip_center - hip_axis * lengths["hipWidth"] * 0.5,
         24: hip_center + hip_axis * lengths["hipWidth"] * 0.5,
@@ -345,9 +383,12 @@ def _constrain_body(
     raw_shoulder_center = (raw[11] + raw[12]) * 0.5
     torso_axis = _unit(raw_shoulder_center - hip_center)
     shoulder_center = hip_center + torso_axis * lengths["torso"]
-    shoulder_axis = raw[12] - raw[11]
-    shoulder_axis -= torso_axis * float(np.dot(shoulder_axis, torso_axis))
-    shoulder_axis = _unit(shoulder_axis, raw[12] - raw[11])
+    raw_shoulder_axis = raw[12] - raw[11]
+    raw_shoulder_axis -= torso_axis * float(np.dot(raw_shoulder_axis, torso_axis))
+    raw_shoulder_axis = _unit(raw_shoulder_axis, raw[12] - raw[11])
+    shoulder_axis = _blend_direction(
+        raw_shoulder_axis, body_lateral_axis, body_side_weight
+    )
     shoulders = {
         11: shoulder_center - shoulder_axis * lengths["shoulderWidth"] * 0.5,
         12: shoulder_center + shoulder_axis * lengths["shoulderWidth"] * 0.5,
