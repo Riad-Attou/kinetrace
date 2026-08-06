@@ -71,6 +71,7 @@ class OptimizationReport:
     fixed_bone_lengths: bool
     rigid_head: bool
     arm_depth_regularization: float
+    head_center_regularization: float
     stabilized_contacts: tuple[str, ...]
     bone_variation_before: float
     bone_variation_after: float
@@ -86,6 +87,7 @@ class OptimizationReport:
             "fixedBoneLengths": value["fixed_bone_lengths"],
             "rigidHead": value["rigid_head"],
             "armDepthRegularization": value["arm_depth_regularization"],
+            "headCenterRegularization": value["head_center_regularization"],
             "stabilizedContacts": value["stabilized_contacts"],
             "boneVariationBefore": value["bone_variation_before"],
             "boneVariationAfter": value["bone_variation_after"],
@@ -105,10 +107,17 @@ def optimize_motion(frames: list[dict[str, Any]], fps: float) -> OptimizationRep
     hand_lengths = _calibrate_hand_lengths(frames)
     face_template = _face_template(frames)
     arm_depth_weight = _arm_depth_weight(frames)
+    head_center_weight = _body_side_view_weight(frames)
     before_variation = _bone_variation(frames)
 
     for frame in frames:
-        _constrain_body(frame, body_lengths, face_template, arm_depth_weight)
+        _constrain_body(
+            frame,
+            body_lengths,
+            face_template,
+            arm_depth_weight,
+            head_center_weight,
+        )
         _constrain_hands(frame, hand_lengths)
 
     tracks = _detect_contacts(frames, fps)
@@ -124,6 +133,7 @@ def optimize_motion(frames: list[dict[str, Any]], fps: float) -> OptimizationRep
         fixed_bone_lengths=True,
         rigid_head=face_template is not None,
         arm_depth_regularization=arm_depth_weight,
+        head_center_regularization=head_center_weight,
         stabilized_contacts=tuple(dict.fromkeys(track.spec.label for track in tracks)),
         bone_variation_before=before_variation,
         bone_variation_after=_bone_variation(frames),
@@ -247,11 +257,40 @@ def _arm_depth_weight(frames: list[dict[str, Any]]) -> float:
     return weight * weight * (3.0 - 2.0 * weight)
 
 
+def _body_side_view_weight(frames: list[dict[str, Any]]) -> float:
+    """Estimate side-view ambiguity from shoulder and hip overlap in image space."""
+    overlap_ratios: list[float] = []
+    for frame in frames:
+        body = _point_map(frame.get("body", []))
+        if not all(index in body and _usable(body[index]) for index in (11, 12, 23, 24)):
+            continue
+        visible_y = [float(point["y"]) for point in body.values() if _usable(point)]
+        if not visible_y:
+            continue
+        body_height = max(visible_y) - min(visible_y)
+        if body_height < 0.05:
+            continue
+        separations = [
+            np.linalg.norm(
+                np.array([body[left]["x"], body[left]["y"]])
+                - np.array([body[right]["x"], body[right]["y"]])
+            )
+            for left, right in ((11, 12), (23, 24))
+        ]
+        overlap_ratios.append(float(np.mean(separations) / body_height))
+    if not overlap_ratios:
+        return 0.0
+    median_ratio = float(np.median(overlap_ratios))
+    weight = float(np.clip((0.14 - median_ratio) / (0.14 - 0.09), 0.0, 1.0))
+    return weight * weight * (3.0 - 2.0 * weight)
+
+
 def _constrain_body(
     frame: dict[str, Any],
     lengths: dict[str, float],
     face_template: Vector | None,
     arm_depth_weight: float,
+    head_center_weight: float,
 ) -> None:
     body = _point_map(frame.get("body", []))
     required = (11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28)
@@ -284,9 +323,22 @@ def _constrain_body(
     arm_chains = ((11, 13, 15), (12, 14, 16))
     upper_directions = [_unit(raw[elbow] - raw[shoulder]) for shoulder, elbow, _ in arm_chains]
     forearm_directions = [_unit(raw[wrist] - raw[elbow]) for _, elbow, wrist in arm_chains]
+    upper_projected = [
+        _project_to_sagittal(direction, shoulder_axis) for direction in upper_directions
+    ]
+    forearm_projected = [
+        _project_to_sagittal(direction, shoulder_axis) for direction in forearm_directions
+    ]
+    shared_upper = _shared_direction(upper_projected)
+    shared_forearm = _shared_direction(forearm_projected)
+    symmetry_weight = arm_depth_weight * 0.85
     for chain_index, (shoulder, elbow, wrist) in enumerate(arm_chains):
-        upper_target = _project_to_sagittal(upper_directions[chain_index], shoulder_axis)
-        forearm_target = _project_to_sagittal(forearm_directions[chain_index], shoulder_axis)
+        upper_target = _blend_optional_shared_direction(
+            upper_projected[chain_index], shared_upper, symmetry_weight
+        )
+        forearm_target = _blend_optional_shared_direction(
+            forearm_projected[chain_index], shared_forearm, symmetry_weight
+        )
         upper_direction = _blend_direction(
             upper_directions[chain_index], upper_target, arm_depth_weight
         )
@@ -317,7 +369,16 @@ def _constrain_body(
             _set_world(body[heel], raw[heel] + ankle_value - raw[ankle])
 
     if face_template is not None:
-        _constrain_face(body, raw, face_template, shoulder_center, torso_axis, lengths["head"])
+        _constrain_face(
+            body,
+            raw,
+            face_template,
+            shoulder_center,
+            shoulder_axis,
+            torso_axis,
+            lengths["head"],
+            head_center_weight,
+        )
 
 
 def _project_to_sagittal(direction: Vector, lateral_axis: Vector) -> Vector:
@@ -328,13 +389,27 @@ def _blend_direction(source: Vector, target: Vector, weight: float) -> Vector:
     return _unit(source * (1.0 - weight) + target * weight, target)
 
 
+def _shared_direction(directions: list[Vector]) -> Vector | None:
+    if float(np.dot(directions[0], directions[1])) < 0.25:
+        return None
+    return _unit(directions[0] + directions[1], directions[0])
+
+
+def _blend_optional_shared_direction(
+    source: Vector, shared: Vector | None, weight: float
+) -> Vector:
+    return source if shared is None else _blend_direction(source, shared, weight)
+
+
 def _constrain_face(
     body: dict[int, dict[str, Any]],
     raw: dict[int, Vector],
     template: Vector,
     shoulder_center: Vector,
+    shoulder_axis: Vector,
     torso_axis: Vector,
     head_length: float,
+    head_center_weight: float,
 ) -> None:
     if not all(index in raw for index in range(11)):
         return
@@ -350,6 +425,8 @@ def _constrain_face(
     raw_ear_center = (raw[7] + raw[8]) * 0.5
     raw_shoulder_center = (raw[11] + raw[12]) * 0.5
     head_axis = _limit_direction(_unit(raw_ear_center - raw_shoulder_center), torso_axis, 35.0)
+    centered_head_axis = _project_to_sagittal(head_axis, shoulder_axis)
+    head_axis = _blend_direction(head_axis, centered_head_axis, head_center_weight)
     target_ear_center = shoulder_center + head_axis * head_length
     transformed = source @ rotation
     transformed += target_ear_center - (transformed[7] + transformed[8]) * 0.5

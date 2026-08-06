@@ -134,11 +134,22 @@ def test_optimizer_regularizes_overlapping_side_view_arms_into_sagittal_plane() 
     report = optimize_motion(frames, fps=25.0)
 
     assert report.arm_depth_regularization > 0.99
+    assert report.head_center_regularization > 0.99
     for value in frames:
         body = {landmark["index"]: landmark for landmark in value["body"]}
         lateral = world(body, 12) - world(body, 11)
         lateral /= np.linalg.norm(lateral)
+        shoulder_center = (world(body, 11) + world(body, 12)) * 0.5
+        hip_center = (world(body, 23) + world(body, 24)) * 0.5
+        torso = shoulder_center - hip_center
+        torso -= lateral * float(np.dot(torso, lateral))
+        torso /= np.linalg.norm(torso)
         for start, end in ((11, 13), (13, 15), (12, 14), (14, 16)):
             direction = world(body, end) - world(body, start)
             direction /= np.linalg.norm(direction)
             assert abs(float(np.dot(direction, lateral))) < 1e-6
+        left_upper = world(body, 13) - world(body, 11)
+        right_upper = world(body, 14) - world(body, 12)
+        assert abs(float(np.dot(left_upper - right_upper, torso))) < 0.02
+        ear_center = (world(body, 7) + world(body, 8)) * 0.5
+        assert abs(float(np.dot(ear_center - shoulder_center, lateral))) < 1e-6
