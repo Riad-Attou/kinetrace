@@ -322,6 +322,7 @@ main { min-height: calc(100vh - 72px); }
 .studio-footnote span { display: flex; align-items: center; gap: 6px; }
 .studio-footnote i { width: 7px; height: 7px; border-radius: 50%; }
 .confidence-good { background: var(--accent); }.confidence-held { background: white; }
+.studio-footnote .optimization-note { color: #b8c785; }
 .studio-footnote p { margin: 0 0 0 auto; }
 
 @media (max-width: 980px) {

@@ -337,6 +337,7 @@ function Studio({
   onReset,
 }: StudioProps) {
   const quality = motion.quality
+  const optimization = motion.metadata.optimization
   return (
     <div className="studio-page">
       <div className="studio-heading">
@@ -386,7 +387,15 @@ function Studio({
       <div className="studio-footnote">
         <span><i className="confidence-good" /> Reliable</span>
         <span><i className="confidence-held" /> Low confidence / temporarily held</span>
-        <p>Hand percentages are directly detected frames · single-camera depth is inferred</p>
+        {optimization && (
+          <span
+            className="optimization-note"
+            title={`${optimization.calibration}; stabilized ${optimization.stabilizedContacts.join(', ')}`}
+          >
+            Auto-optimized · fixed bones · {optimization.stabilizedContacts.length} contacts
+          </span>
+        )}
+        <p>Hand percentages are directly detected frames · single-camera depth is constrained</p>
       </div>
     </div>
   )
