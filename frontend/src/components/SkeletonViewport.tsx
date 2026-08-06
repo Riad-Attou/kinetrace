@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
 import type { Landmark, MotionFrame } from '../types'
+import { createAvatarLayer, updateAvatarLayer, type AvatarLayer } from './AvatarLayer'
 
 type SkeletonViewportProps = {
   frame: MotionFrame | null
@@ -25,8 +26,11 @@ type SceneState = {
     left: Layer
     right: Layer
   }
+  avatar: AvatarLayer
   animationFrame: number
 }
+
+type ViewMode = 'avatar' | 'skeleton' | 'both'
 
 export function SkeletonViewport({
   frame,
@@ -35,6 +39,7 @@ export function SkeletonViewport({
 }: SkeletonViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const stateRef = useRef<SceneState | null>(null)
+  const [viewMode, setViewMode] = useState<ViewMode>('avatar')
 
   useEffect(() => {
     const container = containerRef.current
@@ -44,6 +49,8 @@ export function SkeletonViewport({
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     renderer.setSize(container.clientWidth, container.clientHeight)
     renderer.outputColorSpace = THREE.SRGBColorSpace
+    renderer.toneMapping = THREE.ACESFilmicToneMapping
+    renderer.toneMappingExposure = 1.08
     container.appendChild(renderer.domElement)
 
     const scene = new THREE.Scene()
@@ -75,11 +82,19 @@ export function SkeletonViewport({
     floor.position.y = -1.035
     scene.add(floor)
 
+    const ambient = new THREE.HemisphereLight('#edf2e3', '#171b20', 1.8)
+    const keyLight = new THREE.DirectionalLight('#fff9e8', 2.4)
+    keyLight.position.set(2.4, 3.4, 3.2)
+    const rimLight = new THREE.DirectionalLight('#b7d8ff', 1.35)
+    rimLight.position.set(-2.2, 1.4, -2.5)
+    scene.add(ambient, keyLight, rimLight)
+
     const layers = {
       body: createLayer(scene, '#d8ff59', 0.024),
       left: createLayer(scene, '#57d3ff', 0.018),
       right: createLayer(scene, '#ff6e9f', 0.018),
     }
+    const avatar = createAvatarLayer(scene, handConnections)
 
     const state: SceneState = {
       renderer,
@@ -87,6 +102,7 @@ export function SkeletonViewport({
       camera,
       controls,
       layers,
+      avatar,
       animationFrame: 0,
     }
     stateRef.current = state
@@ -130,16 +146,45 @@ export function SkeletonViewport({
     updateLayer(state.layers.body, frame?.body ?? [], bodyConnections)
     updateLayer(state.layers.left, frame?.hands.left ?? [], handConnections)
     updateLayer(state.layers.right, frame?.hands.right ?? [], handConnections)
+    updateAvatarLayer(state.avatar, frame, handConnections)
   }, [bodyConnections, frame, handConnections])
+
+  useEffect(() => {
+    const state = stateRef.current
+    if (!state) return
+    const showSkeleton = viewMode === 'skeleton' || viewMode === 'both'
+    setLayerVisible(state.layers.body, showSkeleton)
+    setLayerVisible(state.layers.left, showSkeleton)
+    setLayerVisible(state.layers.right, showSkeleton)
+    state.avatar.group.visible = viewMode === 'avatar' || viewMode === 'both'
+  }, [viewMode])
 
   return (
     <div className="viewer-shell skeleton-viewer" ref={containerRef}>
       <div className="viewer-label">
         <span className="cube-mark" /> 3D reconstruction
       </div>
+      <div className="viewer-mode-toggle" role="group" aria-label="3D preview mode">
+        {(['avatar', 'skeleton', 'both'] as const).map((mode) => (
+          <button
+            className={viewMode === mode ? 'active' : ''}
+            type="button"
+            aria-pressed={viewMode === mode}
+            onClick={() => setViewMode(mode)}
+            key={mode}
+          >
+            {mode}
+          </button>
+        ))}
+      </div>
       <div className="viewport-hint">Drag to orbit · Scroll to zoom</div>
     </div>
   )
+}
+
+function setLayerVisible(layer: Layer, visible: boolean) {
+  layer.points.visible = visible
+  layer.lines.visible = visible
 }
 
 function createLayer(scene: THREE.Scene, color: string, pointSize: number): Layer {
