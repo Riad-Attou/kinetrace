@@ -94,6 +94,8 @@ def test_optimizer_auto_calibrates_bones_contacts_and_face() -> None:
         "left hand",
         "right hand",
     }
+    assert report.paired_hand_regularization > 0.99
+    assert abs(float(np.median(contacts[:, 0, 1] - contacts[:, 1, 1]))) < 0.01
     assert report.bone_variation_after < report.bone_variation_before
     assert report.contact_drift_after_meters < report.contact_drift_before_meters
     assert report.arm_depth_regularization == 0.0
@@ -151,8 +153,8 @@ def test_optimizer_regularizes_overlapping_side_view_arms_into_sagittal_plane() 
         left_upper = world(body, 13) - world(body, 11)
         right_upper = world(body, 14) - world(body, 12)
         assert abs(float(np.dot(left_upper - right_upper, torso))) < 1e-6
-        ear_center = (world(body, 7) + world(body, 8)) * 0.5
-        assert abs(float(np.dot(ear_center - shoulder_center, lateral))) < 1e-6
+        face_center = np.mean([world(body, index) for index in range(11)], axis=0)
+        assert abs(float(np.dot(face_center - shoulder_center, lateral))) < 1e-6
 
 
 def test_optimizer_balances_hidden_leg_width_without_flattening_sagittal_motion() -> None:
@@ -226,6 +228,7 @@ def test_optimizer_leaves_leg_spread_alone_when_body_sides_are_visible() -> None
 
     assert report.leg_lateral_regularization == 0.0
     assert report.torso_axis_regularization == 0.0
+    assert report.paired_hand_regularization == 0.0
     for value, before in zip(frames, directions_before, strict=True):
         body = {landmark["index"]: landmark for landmark in value["body"]}
         for chain_index, (hip, knee) in enumerate(((23, 25), (24, 26))):
@@ -267,3 +270,21 @@ def test_optimizer_uses_one_level_torso_axis_for_side_views() -> None:
         assert float(np.dot(hip_axis, shoulder_axis)) > 0.999999
         axes.append(hip_axis)
     assert all(float(np.dot(axes[0], axis)) > 0.999999 for axis in axes[1:])
+
+
+def test_optimizer_treats_oblique_torso_overlap_as_a_side_view() -> None:
+    frames = [frame(index, 1.0) for index in range(10)]
+    for value in frames:
+        body = {landmark["index"]: landmark for landmark in value["body"]}
+        for index, image in {
+            11: (0.46, 0.50),
+            12: (0.54, 0.50),
+            23: (0.484, 0.60),
+            24: (0.516, 0.60),
+        }.items():
+            body[index]["x"], body[index]["y"] = image
+
+    report = optimize_motion(frames, fps=25.0)
+
+    assert report.torso_axis_regularization > 0.99
+    assert report.head_center_regularization > 0.99
