@@ -15,6 +15,7 @@ The application is intentionally local: uploaded videos, extracted landmarks, an
 - Treat sparse pose face landmarks as one rigid head, centering it when shoulder and hip overlap signals a side view.
 - Use one level, clip-stable shoulder/hip axis to prevent side-view torso twist.
 - Keep camera-hidden leg stance width stable in side views while preserving each leg's visible forward/back motion.
+- Align simultaneous planted hands along the body when an oblique side view makes their depth ambiguous.
 - Preview the video overlay and 3D skeleton on a shared timeline.
 - Loop playback while inspecting a reconstructed movement.
 - Mark low-confidence or held landmark observations.

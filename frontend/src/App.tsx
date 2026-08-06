@@ -397,6 +397,7 @@ function Studio({
             {(optimization.headCenterRegularization ?? 0) > 0.5 && ' · head center'}
             {(optimization.legLateralRegularization ?? 0) > 0.5 && ' · leg balance'}
             {(optimization.torsoAxisRegularization ?? 0) > 0.5 && ' · torso frame'}
+            {(optimization.pairedHandRegularization ?? 0) > 0.5 && ' · hand pair'}
           </span>
         )}
         <p>Hand percentages are directly detected frames · single-camera depth is constrained</p>

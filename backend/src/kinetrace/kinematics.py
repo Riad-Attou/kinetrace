@@ -74,6 +74,7 @@ class OptimizationReport:
     head_center_regularization: float
     leg_lateral_regularization: float
     torso_axis_regularization: float
+    paired_hand_regularization: float
     stabilized_contacts: tuple[str, ...]
     bone_variation_before: float
     bone_variation_after: float
@@ -92,6 +93,7 @@ class OptimizationReport:
             "headCenterRegularization": value["head_center_regularization"],
             "legLateralRegularization": value["leg_lateral_regularization"],
             "torsoAxisRegularization": value["torso_axis_regularization"],
+            "pairedHandRegularization": value["paired_hand_regularization"],
             "stabilizedContacts": value["stabilized_contacts"],
             "boneVariationBefore": value["bone_variation_before"],
             "boneVariationAfter": value["bone_variation_after"],
@@ -131,6 +133,9 @@ def optimize_motion(frames: list[dict[str, Any]], fps: float) -> OptimizationRep
         _constrain_hands(frame, hand_lengths)
 
     tracks = _detect_contacts(frames, fps)
+    paired_hand_weight = _align_paired_hand_contacts(
+        tracks, body_lateral_axis, body_side_weight
+    )
     before_contact_drift = _contact_drift(frames, tracks)
     for frame_index, frame in enumerate(frames):
         active = [track for track in tracks if track.start <= frame_index <= track.end]
@@ -146,6 +151,7 @@ def optimize_motion(frames: list[dict[str, Any]], fps: float) -> OptimizationRep
         head_center_regularization=body_side_weight,
         leg_lateral_regularization=body_side_weight,
         torso_axis_regularization=body_side_weight,
+        paired_hand_regularization=paired_hand_weight,
         stabilized_contacts=tuple(dict.fromkeys(track.spec.label for track in tracks)),
         bone_variation_before=before_variation,
         bone_variation_after=_bone_variation(frames),
@@ -293,13 +299,14 @@ def _body_side_view_weight(frames: list[dict[str, Any]]) -> float:
     if not overlap_ratios:
         return 0.0
     median_ratio = float(np.median(overlap_ratios))
-    weight = float(np.clip((0.14 - median_ratio) / (0.14 - 0.09), 0.0, 1.0))
+    weight = float(np.clip((0.24 - median_ratio) / (0.24 - 0.15), 0.0, 1.0))
     return weight * weight * (3.0 - 2.0 * weight)
 
 
 def _calibrate_body_lateral_axis(frames: list[dict[str, Any]]) -> Vector:
     """Find one horizontal left-to-right body axis across reliable clip frames."""
     axes: list[Vector] = []
+    forward_axes: list[Vector] = []
     for frame in frames:
         body = _point_map(frame.get("body", []))
         for left, right in ((11, 12), (23, 24)):
@@ -318,11 +325,29 @@ def _calibrate_body_lateral_axis(frames: list[dict[str, Any]]) -> Vector:
             if axes and float(np.dot(axis, axes[0])) < 0.0:
                 axis = -axis
             axes.append(axis)
+        if all(index in body and _usable(body[index]) for index in (11, 12, 23, 24)):
+            shoulder_center = (_world(body[11]) + _world(body[12])) * 0.5
+            hip_center = (_world(body[23]) + _world(body[24])) * 0.5
+            torso = shoulder_center - hip_center
+            torso_length = float(np.linalg.norm(torso))
+            torso[1] = 0.0
+            if torso_length > 1e-8 and float(np.linalg.norm(torso)) / torso_length >= 0.15:
+                forward = _unit(torso)
+                if forward_axes and float(np.dot(forward, forward_axes[0])) < 0.0:
+                    forward = -forward
+                forward_axes.append(forward)
     if not axes:
         return np.array([1.0, 0.0, 0.0], dtype=float)
     lateral_axis = np.median(np.stack(axes), axis=0)
     lateral_axis[1] = 0.0
-    return _unit(lateral_axis, axes[0])
+    lateral_axis = _unit(lateral_axis, axes[0])
+    if not forward_axes:
+        return lateral_axis
+    forward_axis = np.median(np.stack(forward_axes), axis=0)
+    forward_axis[1] = 0.0
+    forward_axis = _unit(forward_axis, forward_axes[0])
+    orthogonal = np.array([-forward_axis[2], 0.0, forward_axis[0]], dtype=float)
+    return orthogonal if float(np.dot(orthogonal, lateral_axis)) >= 0.0 else -orthogonal
 
 
 def _calibrate_leg_lateral_offset(
@@ -571,6 +596,10 @@ def _constrain_face(
     target_ear_center = shoulder_center + head_axis * head_length
     transformed = source @ rotation
     transformed += target_ear_center - (transformed[7] + transformed[8]) * 0.5
+    face_lateral_offset = float(
+        np.dot(transformed.mean(axis=0) - shoulder_center, shoulder_axis)
+    )
+    transformed -= shoulder_axis * face_lateral_offset * head_center_weight
     for index in range(11):
         _set_world(body[index], transformed[index])
 
@@ -666,6 +695,41 @@ def _detect_contacts(frames: list[dict[str, Any]], fps: float) -> list[ContactTr
         if values:
             track.target[:] = np.median(np.stack(values), axis=0)
     return tracks
+
+
+def _align_paired_hand_contacts(
+    tracks: list[ContactTrack], lateral_axis: Vector, weight: float
+) -> float:
+    """Align simultaneous planted hands along the body's forward/back axis."""
+    if weight <= 0.0:
+        return 0.0
+    left_tracks = [track for track in tracks if track.spec.hand_side == "left"]
+    right_tracks = [track for track in tracks if track.spec.hand_side == "right"]
+    ground_lateral = _unit(lateral_axis[[0, 2]])
+    ground_forward = np.array([-ground_lateral[1], ground_lateral[0]], dtype=float)
+    used_right: set[int] = set()
+    aligned = False
+    for left in left_tracks:
+        candidates = [
+            (min(left.end, right.end) - max(left.start, right.start) + 1, index, right)
+            for index, right in enumerate(right_tracks)
+            if index not in used_right
+            and min(left.end, right.end) - max(left.start, right.start) + 1 >= 5
+        ]
+        if not candidates:
+            continue
+        _, right_index, right = max(candidates, key=lambda value: value[0])
+        used_right.add(right_index)
+        forward_values = [
+            float(np.dot(track.target, ground_forward)) for track in (left, right)
+        ]
+        shared_forward = float(np.mean(forward_values))
+        for track, forward_value in zip(
+            (left, right), forward_values, strict=True
+        ):
+            track.target += ground_forward * (shared_forward - forward_value) * weight
+        aligned = True
+    return weight if aligned else 0.0
 
 
 def _hand_is_near_support_plane(
