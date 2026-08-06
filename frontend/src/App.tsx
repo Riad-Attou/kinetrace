@@ -394,6 +394,7 @@ function Studio({
           >
             Auto-optimized · fixed bones · {optimization.stabilizedContacts.length} hand contacts
             {(optimization.armDepthRegularization ?? 0) > 0.5 && ' · arm depth'}
+            {(optimization.headCenterRegularization ?? 0) > 0.5 && ' · head center'}
           </span>
         )}
         <p>Hand percentages are directly detected frames · single-camera depth is constrained</p>
