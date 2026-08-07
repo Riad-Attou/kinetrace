@@ -21,7 +21,7 @@ import { createJob, getHealth, getJob, getMotion } from './api'
 import { SkeletonViewport } from './components/SkeletonViewport'
 import { SourceViewer } from './components/SourceViewer'
 import { Timeline } from './components/Timeline'
-import type { Health, Job, MotionResult } from './types'
+import type { EngineName, Health, Job, MotionResult } from './types'
 import { nearestFrame } from './utils'
 
 const ACCEPTED_VIDEO = '.mp4,.mov,.webm,.mkv,.avi,.m4v,video/*'
@@ -29,6 +29,7 @@ const ACCEPTED_VIDEO = '.mp4,.mov,.webm,.mkv,.avi,.m4v,video/*'
 function App() {
   const [health, setHealth] = useState<Health | null>(null)
   const [file, setFile] = useState<File | null>(null)
+  const [engine, setEngine] = useState<EngineName>('mediapipe')
   const [dragging, setDragging] = useState(false)
   const [job, setJob] = useState<Job | null>(null)
   const [motion, setMotion] = useState<MotionResult | null>(null)
@@ -82,7 +83,11 @@ function App() {
     () => (motion ? nearestFrame(motion.frames, currentMs) : null),
     [currentMs, motion],
   )
-  const modelsReady = Boolean(health?.models.pose && health?.models.hands)
+  const currentFrameIndex = useMemo(
+    () => (motion && currentFrame ? Math.max(motion.frames.indexOf(currentFrame), 0) : 0),
+    [currentFrame, motion],
+  )
+  const engineReady = Boolean(health?.engines[engine].available)
 
   const selectFile = (candidate: File | null) => {
     if (!candidate) return
@@ -95,7 +100,7 @@ function App() {
     setSubmitting(true)
     setError(null)
     try {
-      setJob(await createJob(file))
+      setJob(await createJob(file, engine))
     } catch (uploadError) {
       setError(messageOf(uploadError))
     } finally {
@@ -147,11 +152,14 @@ function App() {
             file={file}
             dragging={dragging}
             engineChecked={health !== null}
-            modelsReady={modelsReady}
+            engine={engine}
+            engines={health?.engines ?? null}
+            engineReady={engineReady}
             submitting={submitting}
             error={error}
             onFile={selectFile}
             onDragging={setDragging}
+            onEngine={setEngine}
             onStart={startAnalysis}
           />
         )}
@@ -165,6 +173,7 @@ function App() {
             job={job}
             motion={motion}
             currentFrame={currentFrame}
+            currentFrameIndex={currentFrameIndex}
             currentMs={currentMs}
             playing={playing}
             looping={looping}
@@ -185,11 +194,14 @@ type LandingProps = {
   file: File | null
   dragging: boolean
   engineChecked: boolean
-  modelsReady: boolean
+  engine: EngineName
+  engines: Health['engines'] | null
+  engineReady: boolean
   submitting: boolean
   error: string | null
   onFile: (file: File | null) => void
   onDragging: (dragging: boolean) => void
+  onEngine: (engine: EngineName) => void
   onStart: () => void
 }
 
@@ -197,11 +209,14 @@ function Landing({
   file,
   dragging,
   engineChecked,
-  modelsReady,
+  engine,
+  engines,
+  engineReady,
   submitting,
   error,
   onFile,
   onDragging,
+  onEngine,
   onStart,
 }: LandingProps) {
   return (
@@ -221,6 +236,27 @@ function Landing({
       </section>
 
       <section className="upload-column">
+        <div className="engine-picker" role="group" aria-label="Reconstruction engine">
+          <span className="engine-picker-label">Reconstruction engine</span>
+          <div className="engine-options">
+            <EngineOption
+              name="mediapipe"
+              title="MediaPipe"
+              detail="Fast · portable"
+              available={engines?.mediapipe.available ?? false}
+              selected={engine === 'mediapipe'}
+              onSelect={onEngine}
+            />
+            <EngineOption
+              name="gemx"
+              title="GEM-X"
+              detail="Quality · NVIDIA GPU"
+              available={engines?.gemx.available ?? false}
+              selected={engine === 'gemx'}
+              onSelect={onEngine}
+            />
+          </div>
+        </div>
         <label
           className={`dropzone ${dragging ? 'dragging' : ''} ${file ? 'has-file' : ''}`}
           onDragEnter={(event) => { event.preventDefault(); onDragging(true) }}
@@ -251,18 +287,21 @@ function Landing({
           <div className="corner corner-three" /><div className="corner corner-four" />
         </label>
 
-        {engineChecked && !modelsReady && (
-          <div className="notice warning"><AlertTriangle size={16} /> Models are not ready. Run <code>make models</code>.</div>
+        {engineChecked && !engineReady && (
+          <div className="notice warning">
+            <AlertTriangle size={16} />
+            {engines?.[engine].reason ?? 'The selected engine is not ready.'}
+          </div>
         )}
         {error && <div className="notice error"><AlertTriangle size={16} /> {error}</div>}
         <button
           className="primary-action"
           type="button"
-          disabled={!file || !modelsReady || submitting}
+          disabled={!file || !engineReady || submitting}
           onClick={onStart}
         >
           {submitting ? <RefreshCw className="spin" size={18} /> : <Activity size={18} />}
-          {submitting ? 'Uploading locally…' : 'Reconstruct motion'}
+          {submitting ? 'Uploading locally…' : `Reconstruct with ${engine === 'gemx' ? 'GEM-X' : 'MediaPipe'}`}
           {!submitting && <ChevronRight size={18} />}
         </button>
         <p className="local-note"><FolderLock size={14} /> No cloud upload. Processing and files stay local.</p>
@@ -275,6 +314,35 @@ function Landing({
         <PipelineStep number="04" icon={<Download />} label="JSON + BVH" last />
       </section>
     </div>
+  )
+}
+
+function EngineOption({
+  name,
+  title,
+  detail,
+  available,
+  selected,
+  onSelect,
+}: {
+  name: EngineName
+  title: string
+  detail: string
+  available: boolean
+  selected: boolean
+  onSelect: (engine: EngineName) => void
+}) {
+  return (
+    <button
+      className={`engine-option ${selected ? 'selected' : ''} ${available ? '' : 'unavailable'}`}
+      type="button"
+      aria-pressed={selected}
+      onClick={() => onSelect(name)}
+    >
+      <span className="engine-radio"><i /></span>
+      <span><strong>{title}</strong><small>{detail}</small></span>
+      <em>{available ? 'Ready' : 'Setup'}</em>
+    </button>
   )
 }
 
@@ -293,7 +361,9 @@ function Processing({ job, error, onReset }: { job: Job; error: string | null; o
       <div className={`processing-orb ${failed ? 'failed' : ''}`}>
         {failed ? <AlertTriangle size={36} /> : <ScanLine size={36} />}
       </div>
-      <div className="eyebrow">{failed ? 'Analysis interrupted' : 'Local reconstruction'}</div>
+      <div className="eyebrow">
+        {failed ? 'Analysis interrupted' : `${job.engine === 'gemx' ? 'GEM-X' : 'MediaPipe'} reconstruction`}
+      </div>
       <h2>{failed ? 'Something needs attention' : job.stage}</h2>
       <p>{failed ? (error ?? job.error) : job.filename}</p>
       {!failed && (
@@ -311,6 +381,7 @@ type StudioProps = {
   job: Job
   motion: MotionResult
   currentFrame: ReturnType<typeof nearestFrame>
+  currentFrameIndex: number
   currentMs: number
   playing: boolean
   looping: boolean
@@ -326,6 +397,7 @@ function Studio({
   job,
   motion,
   currentFrame,
+  currentFrameIndex,
   currentMs,
   playing,
   looping,
@@ -373,6 +445,8 @@ function Studio({
           frame={currentFrame}
           bodyConnections={motion.skeleton.bodyConnections}
           handConnections={motion.skeleton.handConnections}
+          mesh={motion.mesh}
+          meshFrameIndex={currentFrameIndex}
         />
       </div>
       <Timeline

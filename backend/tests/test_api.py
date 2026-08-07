@@ -12,6 +12,9 @@ def test_health_reports_local_engine() -> None:
     assert payload["status"] == "ok"
     assert payload["version"] == "0.2.0"
     assert set(payload["models"]) == {"pose", "hands"}
+    assert set(payload["engines"]) == {"mediapipe", "gemx"}
+    assert payload["engines"]["mediapipe"]["label"] == "MediaPipe"
+    assert payload["engines"]["gemx"]["label"] == "GEM-X"
 
 
 def test_unknown_job_is_not_found() -> None:

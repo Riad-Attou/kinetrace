@@ -7,11 +7,12 @@ from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile, status
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from kinetrace import __version__
+from kinetrace.engines import EngineName, engine_catalog, engine_status
 from kinetrace.jobs import JobRecord, job_store
 from kinetrace.processor import process_video
 from kinetrace.settings import settings
@@ -53,13 +54,23 @@ def health() -> dict[str, object]:
             "pose": settings.pose_model.exists(),
             "hands": settings.hand_model.exists(),
         },
+        "engines": engine_catalog(),
     }
 
 
 @app.post("/api/jobs", status_code=status.HTTP_202_ACCEPTED)
 async def create_job(
-    request: Request, video: Annotated[UploadFile, File(...)]
+    request: Request,
+    video: Annotated[UploadFile, File(...)],
+    engine: Annotated[EngineName, Form()] = "mediapipe",
 ) -> dict[str, object]:
+    readiness = engine_status(engine)
+    if not readiness["available"]:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"{readiness['label']} is not ready. {readiness['reason']}",
+        )
+
     filename = Path(video.filename or "video.mp4").name
     extension = Path(filename).suffix.lower()
     if extension not in ALLOWED_EXTENSIONS:
@@ -97,6 +108,7 @@ async def create_job(
         filename=filename,
         source_path=source_path,
         directory=job_directory,
+        engine=engine,
     )
     job_store.add(record)
     request.app.state.executor.submit(process_video, job_id, job_store)
