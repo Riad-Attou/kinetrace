@@ -7,6 +7,7 @@ import cv2
 import mediapipe as mp
 
 from kinetrace.bvh import export_bvh
+from kinetrace.gemx import process_gemx_video
 from kinetrace.jobs import JobStore
 from kinetrace.kinematics import optimize_motion
 from kinetrace.landmarks import (
@@ -27,6 +28,9 @@ def process_video(job_id: str, store: JobStore) -> None:
     if record is None:
         return
     try:
+        if record.engine == "gemx":
+            process_gemx_video(job_id, store)
+            return
         store.update(job_id, status="processing", progress=0.01, stage="Checking local models")
         missing = [path for path in (settings.pose_model, settings.hand_model) if not path.exists()]
         if missing:
@@ -127,6 +131,7 @@ def process_video(job_id: str, store: JobStore) -> None:
             "schemaVersion": "0.2.0",
             "metadata": {
                 "sourceFilename": record.filename,
+                "engine": "mediapipe",
                 "width": width,
                 "height": height,
                 "fps": fps,

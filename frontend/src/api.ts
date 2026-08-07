@@ -1,4 +1,4 @@
-import type { Health, Job, MotionResult } from './types'
+import type { EngineName, Health, Job, MotionResult } from './types'
 
 async function responseJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -18,9 +18,10 @@ export async function getHealth(): Promise<Health> {
   return responseJson<Health>(await fetch('/api/health'))
 }
 
-export async function createJob(file: File): Promise<Job> {
+export async function createJob(file: File, engine: EngineName): Promise<Job> {
   const body = new FormData()
   body.append('video', file)
+  body.append('engine', engine)
   return responseJson<Job>(await fetch('/api/jobs', { method: 'POST', body }))
 }
 

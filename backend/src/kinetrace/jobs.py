@@ -6,6 +6,8 @@ from pathlib import Path
 from threading import RLock
 from typing import Literal
 
+from kinetrace.engines import EngineName
+
 JobStatus = Literal["queued", "processing", "complete", "failed"]
 
 
@@ -15,6 +17,7 @@ class JobRecord:
     filename: str
     source_path: Path
     directory: Path
+    engine: EngineName = "mediapipe"
     status: JobStatus = "queued"
     progress: float = 0.0
     stage: str = "Queued"

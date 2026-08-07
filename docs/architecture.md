@@ -9,9 +9,9 @@ Browser (React + Three.js)
           v
 FastAPI job service
           |
-          +-- OpenCV video decoding
-          +-- MediaPipe Pose Landmarker
-          +-- MediaPipe Hand Landmarker
+          +-- selected inference engine
+          |     +-- MediaPipe Pose + Hand Landmarkers
+          |     `-- isolated GEM-X/SOMA CUDA subprocess
           +-- confidence-aware stabilization
           +-- automatic kinematic/contact optimization
           +-- canonical JSON and BVH exporters
@@ -20,7 +20,7 @@ FastAPI job service
 ## Processing stages
 
 1. The API validates and stores a source video in a random local job directory.
-2. OpenCV decodes frames in presentation order.
+2. The selected engine runs. MediaPipe stays inside the API process; GEM-X runs in its own pinned Python/CUDA environment and returns a compact interchange file.
 3. Pose Landmarker produces 33 normalized and root-relative 3D body landmarks.
 4. Hand Landmarker produces 21 landmarks for each visible hand.
 5. Detected hands are assigned to the nearest left/right pose wrist instead of relying on ambiguous palm handedness classification.
@@ -33,6 +33,8 @@ FastAPI job service
 12. Low image-space motion identifies likely planted feet and hands. Paired feet recover global root translation and a support plane before residual leg IK locks each contact; paired support targets share only camera-hidden coordinates. Planted hands use reach-limited arm IK and retain one reliable articulated hand pose through short occlusions.
 13. Results and optimization diagnostics are serialized using a versioned schema.
 14. The experimental BVH exporter estimates fixed rest offsets and per-joint rotations from the constrained motion.
+
+For GEM-X jobs, its official preprocessing and contact-aware global SOMA reconstruction replace steps 3–12. A boundary adapter maps SOMA77 body/finger joints and ViTPose image observations into the same 33-body/21-hand KineTrace contract. Before export, the actual mesh surface is grounded. High-confidence wrist contacts receive an additional palm correction only when the wrist is close to the ground and the fingers are extended. Each contacted finger retains its predicted bone lengths while its SOMA chain and skin-weighted surface are regularized into a stable palm-local anatomical fan; raised or curled/gripping hands are not changed. The animated full-detail SOMA surface is globally quantized to signed 16-bit coordinates and carried as base64 binary buffers, avoiding a large nested-float JSON payload. The browser decodes one topology, derives its floor and camera target from the sequence bounds, and selects the corresponding vertex frame during playback. This keeps the studio and generic BVH exporter directly comparable across engines. KineTrace does not apply its MediaPipe optimizer a second time to GEM-X motion.
 
 The browser drives both its diagnostic skeleton and a built-in segmented mannequin directly from the same optimized landmarks. The mannequin is a local procedural preview rather than a skinned character, so it needs no external model and does not alter JSON or BVH exports.
 

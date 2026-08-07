@@ -1,4 +1,4 @@
-.PHONY: bootstrap models dev api web test lint build
+.PHONY: bootstrap models gemx dev api web test lint build
 
 bootstrap:
 	python3 -m venv .venv
@@ -9,6 +9,9 @@ bootstrap:
 
 models:
 	.venv/bin/python scripts/download_models.py
+
+gemx:
+	./scripts/setup_gemx.sh
 
 dev:
 	./scripts/dev.sh

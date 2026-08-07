@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
-import type { Landmark, MotionFrame } from '../types'
+import type { EncodedMesh, Landmark, MotionFrame } from '../types'
 import { createAvatarLayer, updateAvatarLayer, type AvatarLayer } from './AvatarLayer'
 
 type SkeletonViewportProps = {
   frame: MotionFrame | null
   bodyConnections: [number, number][]
   handConnections: [number, number][]
+  mesh?: EncodedMesh
+  meshFrameIndex: number
 }
 
 type Layer = {
@@ -27,21 +29,33 @@ type SceneState = {
     right: Layer
   }
   avatar: AvatarLayer
+  reconstruction: THREE.Mesh
+  ground: THREE.Group
   animationFrame: number
 }
 
-type ViewMode = 'avatar' | 'skeleton' | 'both'
+type ViewMode = 'model' | 'skeleton' | 'both'
 type CameraView = 'front' | 'side' | 'top'
+
+type DecodedMesh = Omit<EncodedMesh, 'vertices' | 'faces'> & {
+  vertices: Int16Array
+  faces: Uint16Array
+  bounds: THREE.Box3
+  groundY: number
+}
 
 export function SkeletonViewport({
   frame,
   bodyConnections,
   handConnections,
+  mesh,
+  meshFrameIndex,
 }: SkeletonViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const stateRef = useRef<SceneState | null>(null)
-  const [viewMode, setViewMode] = useState<ViewMode>('avatar')
+  const [viewMode, setViewMode] = useState<ViewMode>('model')
   const [cameraView, setCameraView] = useState<CameraView | null>(null)
+  const decodedMesh = useMemo(() => decodeMesh(mesh), [mesh])
 
   useEffect(() => {
     const container = containerRef.current
@@ -74,17 +88,19 @@ export function SkeletonViewport({
     const clearCameraPreset = () => setCameraView(null)
     controls.addEventListener('start', clearCameraPreset)
 
+    const ground = new THREE.Group()
+    ground.position.y = -1.03
     const grid = new THREE.GridHelper(4, 16, '#30353c', '#20242a')
-    grid.position.y = -1.03
-    scene.add(grid)
+    ground.add(grid)
 
     const floor = new THREE.Mesh(
       new THREE.CircleGeometry(1.7, 64),
       new THREE.MeshBasicMaterial({ color: '#15191e', transparent: true, opacity: 0.72 }),
     )
     floor.rotation.x = -Math.PI / 2
-    floor.position.y = -1.035
-    scene.add(floor)
+    floor.position.y = -0.005
+    ground.add(floor)
+    scene.add(ground)
 
     const ambient = new THREE.HemisphereLight('#edf2e3', '#171b20', 1.8)
     const keyLight = new THREE.DirectionalLight('#fff9e8', 2.4)
@@ -99,6 +115,7 @@ export function SkeletonViewport({
       right: createLayer(scene, '#ff6e9f', 0.018),
     }
     const avatar = createAvatarLayer(scene, handConnections)
+    const reconstruction = createReconstructionMesh(scene)
 
     const state: SceneState = {
       renderer,
@@ -107,6 +124,8 @@ export function SkeletonViewport({
       controls,
       layers,
       avatar,
+      reconstruction,
+      ground,
       animationFrame: 0,
     }
     stateRef.current = state
@@ -152,17 +171,40 @@ export function SkeletonViewport({
     updateLayer(state.layers.left, frame?.hands.left ?? [], handConnections)
     updateLayer(state.layers.right, frame?.hands.right ?? [], handConnections)
     updateAvatarLayer(state.avatar, frame, handConnections)
-  }, [bodyConnections, frame, handConnections])
+    updateReconstructionMesh(state.reconstruction, decodedMesh, meshFrameIndex)
+  }, [bodyConnections, decodedMesh, frame, handConnections, meshFrameIndex])
 
   useEffect(() => {
     const state = stateRef.current
     if (!state) return
+    state.reconstruction.geometry.setIndex(
+      decodedMesh ? new THREE.BufferAttribute(decodedMesh.faces, 1) : null,
+    )
+    if (decodedMesh && state.reconstruction.geometry.hasAttribute('position')) {
+      state.reconstruction.geometry.computeVertexNormals()
+    }
+    state.ground.position.y = decodedMesh ? decodedMesh.groundY : -1.03
+    if (decodedMesh) {
+      const target = decodedMesh.bounds.getCenter(new THREE.Vector3())
+      const cameraOffset = target.clone().sub(state.controls.target)
+      state.controls.target.copy(target)
+      state.camera.position.add(cameraOffset)
+      state.controls.update()
+    }
+  }, [decodedMesh])
+
+  useEffect(() => {
+    const state = stateRef.current
+    if (!state) return
+    const showModel = viewMode === 'model' || viewMode === 'both'
     const showSkeleton = viewMode === 'skeleton' || viewMode === 'both'
+    const hasReconstruction = Boolean(decodedMesh)
     setLayerVisible(state.layers.body, showSkeleton)
     setLayerVisible(state.layers.left, showSkeleton)
     setLayerVisible(state.layers.right, showSkeleton)
-    state.avatar.group.visible = viewMode === 'avatar' || viewMode === 'both'
-  }, [viewMode])
+    state.reconstruction.visible = showModel && hasReconstruction
+    state.avatar.group.visible = showModel && !hasReconstruction
+  }, [decodedMesh, viewMode])
 
   const selectCameraView = (mode: CameraView) => {
     const state = stateRef.current
@@ -202,10 +244,10 @@ export function SkeletonViewport({
   return (
     <div className="viewer-shell skeleton-viewer" ref={containerRef}>
       <div className="viewer-label">
-        <span className="cube-mark" /> 3D reconstruction
+        <span className="cube-mark" /> {decodedMesh ? 'SOMA reconstruction' : '3D reconstruction'}
       </div>
       <div className="viewer-mode-toggle" role="group" aria-label="3D preview mode">
-        {(['avatar', 'skeleton', 'both'] as const).map((mode) => (
+        {(['model', 'skeleton', 'both'] as const).map((mode) => (
           <button
             className={viewMode === mode ? 'active' : ''}
             type="button"
@@ -251,6 +293,97 @@ function createLayer(scene: THREE.Scene, color: string, pointSize: number): Laye
   )
   scene.add(lines, points)
   return { points, lines }
+}
+
+function createReconstructionMesh(scene: THREE.Scene) {
+  const mesh = new THREE.Mesh(
+    new THREE.BufferGeometry(),
+    new THREE.MeshStandardMaterial({
+      color: '#c9a58e',
+      roughness: 0.72,
+      metalness: 0,
+      side: THREE.DoubleSide,
+    }),
+  )
+  mesh.visible = false
+  mesh.frustumCulled = false
+  scene.add(mesh)
+  return mesh
+}
+
+function updateReconstructionMesh(
+  mesh: THREE.Mesh,
+  decoded: DecodedMesh | null,
+  frameIndex: number,
+) {
+  if (!decoded) {
+    mesh.geometry.deleteAttribute('position')
+    return
+  }
+  const safeFrame = Math.min(Math.max(frameIndex, 0), decoded.frameCount - 1)
+  const frameOffset = safeFrame * decoded.vertexCount * 3
+  const currentPosition = mesh.geometry.getAttribute('position')
+  const positions = currentPosition instanceof THREE.BufferAttribute
+    && currentPosition.array instanceof Float32Array
+    && currentPosition.array.length === decoded.vertexCount * 3
+    ? currentPosition.array
+    : new Float32Array(decoded.vertexCount * 3)
+  for (let index = 0; index < positions.length; index += 3) {
+    positions[index] = decoded.offset[0] + decoded.vertices[frameOffset + index] * decoded.scale[0]
+    positions[index + 1] = -(decoded.offset[1] + decoded.vertices[frameOffset + index + 1] * decoded.scale[1])
+    positions[index + 2] = -(decoded.offset[2] + decoded.vertices[frameOffset + index + 2] * decoded.scale[2])
+  }
+  if (positions === currentPosition?.array) currentPosition.needsUpdate = true
+  else mesh.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  mesh.geometry.computeVertexNormals()
+  mesh.geometry.computeBoundingSphere()
+}
+
+function decodeMesh(mesh: EncodedMesh | undefined): DecodedMesh | null {
+  if (!mesh || mesh.encoding !== 'int16-le-base64') return null
+  const vertexBytes = decodeBase64(mesh.vertices)
+  const faceBytes = decodeBase64(mesh.faces)
+  const expectedVertices = mesh.frameCount * mesh.vertexCount * 3
+  const expectedFaces = mesh.faceCount * 3
+  if (vertexBytes.byteLength !== expectedVertices * 2 || faceBytes.byteLength !== expectedFaces * 2) {
+    return null
+  }
+  const vertexView = new DataView(vertexBytes.buffer, vertexBytes.byteOffset, vertexBytes.byteLength)
+  const faceView = new DataView(faceBytes.buffer, faceBytes.byteOffset, faceBytes.byteLength)
+  const vertices = new Int16Array(expectedVertices)
+  const faces = new Uint16Array(expectedFaces)
+  const minimum = new THREE.Vector3(Infinity, Infinity, Infinity)
+  const maximum = new THREE.Vector3(-Infinity, -Infinity, -Infinity)
+  for (let index = 0; index < expectedVertices; index += 1) {
+    vertices[index] = vertexView.getInt16(index * 2, true)
+    if (index % 3 === 2) {
+      const vertexIndex = index - 2
+      const x = mesh.offset[0] + vertices[vertexIndex] * mesh.scale[0]
+      const y = -(mesh.offset[1] + vertices[vertexIndex + 1] * mesh.scale[1])
+      const z = -(mesh.offset[2] + vertices[vertexIndex + 2] * mesh.scale[2])
+      minimum.set(Math.min(minimum.x, x), Math.min(minimum.y, y), Math.min(minimum.z, z))
+      maximum.set(Math.max(maximum.x, x), Math.max(maximum.y, y), Math.max(maximum.z, z))
+    }
+  }
+  for (let index = 0; index < expectedFaces; index += 1) {
+    faces[index] = faceView.getUint16(index * 2, true)
+  }
+  return {
+    ...mesh,
+    vertices,
+    faces,
+    bounds: new THREE.Box3(minimum, maximum),
+    groundY: minimum.y,
+  }
+}
+
+function decodeBase64(value: string): Uint8Array {
+  const binary = atob(value)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return bytes
 }
 
 function updateLayer(layer: Layer, landmarks: Landmark[], connections: [number, number][]) {
