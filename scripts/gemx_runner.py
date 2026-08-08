@@ -24,6 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--video", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--output-json", type=Path, required=True)
+    parser.add_argument("--output-soma-npz", type=Path, required=True)
     parser.add_argument("--static-camera", action="store_true")
     parser.add_argument(
         "--sam3d-batch-size",
@@ -65,6 +66,87 @@ def encode_mesh(vertices, faces) -> dict[str, object]:
         "vertices": base64.b64encode(quantized.tobytes()).decode("ascii"),
         "faces": base64.b64encode(triangles.tobytes()).decode("ascii"),
     }
+
+
+def export_soma_npz(
+    torch,
+    body_params,
+    soma,
+    fps: float,
+    destination: Path,
+    root_translation_offset=None,
+) -> None:
+    """Preserve GEM-X's native SOMA rotations for MetaHuman retargeting."""
+    from soma import save_soma_npz
+
+    global_orient = body_params["global_orient"]
+    has_sequence_batch = global_orient.ndim == 3
+
+    def sequence(name):
+        value = body_params[name]
+        if has_sequence_batch:
+            if value.shape[0] != 1:
+                raise RuntimeError(f"Cannot export batched SOMA parameter '{name}'")
+            value = value[0]
+        return value.detach().float()
+
+    global_orient = sequence("global_orient")
+    body_pose = sequence("body_pose")
+    transl = sequence("transl")
+    identity_coeffs = sequence("identity_coeffs")
+    scale_params = sequence("scale_params")
+
+    frame_count = global_orient.shape[0]
+    if global_orient.shape != (frame_count, 3):
+        raise RuntimeError(f"Unexpected SOMA global orientation shape {global_orient.shape}")
+    if body_pose.numel() != frame_count * 76 * 3:
+        raise RuntimeError(f"Unexpected SOMA body pose shape {body_pose.shape}")
+    if transl.shape != (frame_count, 3):
+        raise RuntimeError(f"Unexpected SOMA translation shape {transl.shape}")
+    if root_translation_offset is not None:
+        root_translation_offset = root_translation_offset.detach().float()
+        while root_translation_offset.ndim > 2 and root_translation_offset.shape[0] == 1:
+            root_translation_offset = root_translation_offset[0]
+        if root_translation_offset.shape != transl.shape:
+            raise RuntimeError(
+                "SOMA ground offset does not match translation shape "
+                f"{root_translation_offset.shape} != {transl.shape}"
+            )
+        transl = transl + root_translation_offset.to(transl.device)
+
+    # SOMA's interchange format starts with a virtual Root. GEM-X predicts the
+    # 77 deform joints beginning at Hips, so prepend an identity Root and let
+    # save_soma_npz omit it in the standard no-Root representation.
+    body_pose = body_pose.reshape(frame_count, 76, 3)
+    poses = torch.cat([global_orient[:, None], body_pose], dim=1)
+    poses = torch.cat([torch.zeros_like(poses[:, :1]), poses], dim=1)
+
+    underlying_soma = soma.soma
+    joint_names = list(underlying_soma.rig_data["joint_names"])
+    if len(joint_names) != 78:
+        raise RuntimeError(f"Unexpected SOMA rig joint count {len(joint_names)}")
+
+    # GEM-X stores a uniform global scale in column zero followed by MHR's 68
+    # body-part scales. The canonical SOMA identity field expects only the 68
+    # MHR values, so retain global scale as explicit metadata.
+    averaged_scale = scale_params.mean(dim=0, keepdim=True)
+    save_soma_npz(
+        destination,
+        poses,
+        transl,
+        joint_names=joint_names,
+        identity_model_type=underlying_soma.identity_model_type,
+        identity_coeffs=identity_coeffs.mean(dim=0, keepdim=True),
+        scale_params=averaged_scale[:, 1:],
+        joint_orient=underlying_soma._t_pose_orient,
+        unit="meters",
+        keep_root=False,
+        extra_arrays={
+            "fps": np.array(fps, dtype=np.float32),
+            "global_scale": averaged_scale[:, :1].detach().cpu().numpy(),
+            "source": np.array("GEM-X"),
+        },
+    )
 
 
 def _rotation_between(torch, source, target):
@@ -397,6 +479,9 @@ def main() -> None:
             soma_output["joints"],
             prediction,
         )
+        root_translation_offset = (
+            joints[..., 0, :] - soma_output["joints"][..., 0, :]
+        )
         joints = joints.detach().float().cpu()
         vertices = vertices.detach().float().cpu()
         faces = soma.faces.detach().long().cpu()
@@ -417,6 +502,16 @@ def main() -> None:
     capture.release()
     if fps <= 1.0 or fps > 240.0:
         fps = 30.0
+
+    report_progress(0.91, "Exporting native SOMA motion for MetaHuman")
+    export_soma_npz(
+        torch,
+        body_params,
+        soma,
+        fps,
+        args.output_soma_npz,
+        root_translation_offset=root_translation_offset,
+    )
 
     output = {
         "fps": fps,

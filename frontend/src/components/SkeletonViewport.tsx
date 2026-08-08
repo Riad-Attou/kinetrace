@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 
 import type { EncodedMesh, Landmark, MotionFrame } from '../types'
 import { createAvatarLayer, updateAvatarLayer, type AvatarLayer } from './AvatarLayer'
@@ -29,7 +30,7 @@ type SceneState = {
     right: Layer
   }
   avatar: AvatarLayer
-  reconstruction: THREE.Mesh
+  reconstruction: THREE.Mesh<THREE.BufferGeometry, THREE.MeshPhysicalMaterial>
   ground: THREE.Group
   animationFrame: number
 }
@@ -66,12 +67,18 @@ export function SkeletonViewport({
     renderer.setSize(container.clientWidth, container.clientHeight)
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.toneMapping = THREE.ACESFilmicToneMapping
-    renderer.toneMappingExposure = 1.08
+    renderer.toneMappingExposure = 1.12
+    renderer.shadowMap.enabled = true
+    renderer.shadowMap.type = THREE.PCFShadowMap
     container.appendChild(renderer.domElement)
 
     const scene = new THREE.Scene()
     scene.background = new THREE.Color('#101215')
     scene.fog = new THREE.Fog('#101215', 3.5, 7)
+    const environment = new RoomEnvironment()
+    const environmentGenerator = new THREE.PMREMGenerator(renderer)
+    const environmentMap = environmentGenerator.fromScene(environment, 0.04).texture
+    scene.environment = environmentMap
     const camera = new THREE.PerspectiveCamera(
       38,
       container.clientWidth / Math.max(container.clientHeight, 1),
@@ -95,19 +102,38 @@ export function SkeletonViewport({
 
     const floor = new THREE.Mesh(
       new THREE.CircleGeometry(1.7, 64),
-      new THREE.MeshBasicMaterial({ color: '#15191e', transparent: true, opacity: 0.72 }),
+      new THREE.MeshStandardMaterial({
+        color: '#15191e',
+        roughness: 0.92,
+        metalness: 0,
+        transparent: true,
+        opacity: 0.82,
+      }),
     )
     floor.rotation.x = -Math.PI / 2
     floor.position.y = -0.005
+    floor.receiveShadow = true
     ground.add(floor)
     scene.add(ground)
 
-    const ambient = new THREE.HemisphereLight('#edf2e3', '#171b20', 1.8)
-    const keyLight = new THREE.DirectionalLight('#fff9e8', 2.4)
+    const ambient = new THREE.HemisphereLight('#edf2e3', '#171b20', 1.35)
+    const keyLight = new THREE.DirectionalLight('#fff4e5', 3.15)
     keyLight.position.set(2.4, 3.4, 3.2)
-    const rimLight = new THREE.DirectionalLight('#b7d8ff', 1.35)
+    keyLight.castShadow = true
+    keyLight.shadow.mapSize.set(2048, 2048)
+    keyLight.shadow.camera.near = 0.1
+    keyLight.shadow.camera.far = 12
+    keyLight.shadow.camera.left = -3
+    keyLight.shadow.camera.right = 3
+    keyLight.shadow.camera.top = 3
+    keyLight.shadow.camera.bottom = -3
+    keyLight.shadow.bias = -0.00015
+    keyLight.shadow.normalBias = 0.012
+    const fillLight = new THREE.DirectionalLight('#ffd8c5', 0.75)
+    fillLight.position.set(-2.6, 1.6, 2.4)
+    const rimLight = new THREE.DirectionalLight('#a9ceff', 1.7)
     rimLight.position.set(-2.2, 1.4, -2.5)
-    scene.add(ambient, keyLight, rimLight)
+    scene.add(ambient, keyLight, fillLight, rimLight)
 
     const layers = {
       body: createLayer(scene, '#d8ff59', 0.024),
@@ -151,7 +177,6 @@ export function SkeletonViewport({
       cancelAnimationFrame(state.animationFrame)
       controls.removeEventListener('start', clearCameraPreset)
       controls.dispose()
-      renderer.dispose()
       scene.traverse((object) => {
         if (object instanceof THREE.Mesh || object instanceof THREE.Points || object instanceof THREE.LineSegments) {
           object.geometry.dispose()
@@ -159,6 +184,10 @@ export function SkeletonViewport({
           else object.material.dispose()
         }
       })
+      environmentMap.dispose()
+      environmentGenerator.dispose()
+      environment.dispose()
+      renderer.dispose()
       renderer.domElement.remove()
       stateRef.current = null
     }
@@ -225,7 +254,9 @@ export function SkeletonViewport({
     const lateral = rightShoulder.clone().sub(leftShoulder)
     lateral.y = 0
     lateral.normalize()
-    const forward = lateral.clone().cross(up).normalize()
+    const forward = decodedMesh
+      ? up.clone().cross(lateral).normalize()
+      : lateral.clone().cross(up).normalize()
     const direction = mode === 'front' ? forward : mode === 'side' ? lateral : up
     const distance = THREE.MathUtils.clamp(
       state.camera.position.distanceTo(state.controls.target),
@@ -298,15 +329,20 @@ function createLayer(scene: THREE.Scene, color: string, pointSize: number): Laye
 function createReconstructionMesh(scene: THREE.Scene) {
   const mesh = new THREE.Mesh(
     new THREE.BufferGeometry(),
-    new THREE.MeshStandardMaterial({
+    new THREE.MeshPhysicalMaterial({
       color: '#c9a58e',
-      roughness: 0.72,
+      roughness: 0.58,
       metalness: 0,
+      sheen: 0.22,
+      sheenColor: new THREE.Color('#f0c4ae'),
+      sheenRoughness: 0.78,
       side: THREE.DoubleSide,
     }),
   )
   mesh.visible = false
   mesh.frustumCulled = false
+  mesh.castShadow = true
+  mesh.receiveShadow = true
   scene.add(mesh)
   return mesh
 }

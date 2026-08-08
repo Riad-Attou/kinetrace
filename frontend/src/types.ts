@@ -101,6 +101,7 @@ export type Job = {
     source: string
     json?: string
     bvh?: string
+    soma?: string
   }
 }
 

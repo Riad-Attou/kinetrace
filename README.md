@@ -1,6 +1,6 @@
 # KineTrace
 
-KineTrace is a local-first monocular motion-capture studio. It turns a video of one visible person into synchronized 2D and 3D pose data, including articulated hands, and exports both lossless JSON and an experimental Blender-compatible BVH animation.
+KineTrace is a local-first monocular motion-capture studio. It turns a video of one visible person into synchronized 2D and 3D pose data, including articulated hands, and exports lossless JSON, an experimental Blender-compatible BVH animation, and native SOMA motion from GEM-X for MetaHuman retargeting.
 
 The application is intentionally local: uploaded videos, extracted landmarks, and exports remain on your computer.
 
@@ -23,7 +23,7 @@ The application is intentionally local: uploaded videos, extracted landmarks, an
 - Mark low-confidence or held landmark observations.
 - Export canonical JSON and an experimental BVH armature animation.
 
-Webcam capture, manual correction keyframes, side-by-side result comparison, and Blender retargeting helpers are planned next.
+Webcam capture, manual correction keyframes, side-by-side result comparison, and an optimized MetaHuman browser preview are planned next.
 
 ## Arch Linux setup
 
@@ -63,6 +63,8 @@ The SAM-3D preprocessing batch defaults to `1` so GEM-X fits an 8 GB GPU; larger
 
 GEM-X jobs also include the animated full-detail SOMA surface. KineTrace stores its per-frame vertices as quantized 16-bit buffers in the motion JSON and decodes them directly in the 3D viewer; the skeleton and BVH remain available for inspection and export. The viewer derives its floor and initial camera target from the reconstructed bounds. A conservative contact pass plants low, open palms and regularizes their finger chains into a natural palm-local fan when GEM-X reports high wrist-contact confidence, while raised or curled/gripping hands are left unchanged.
 
+Every completed GEM-X job additionally exposes **MetaHuman motion**, a canonical SOMA `.npz` containing GEM-X's original 77-joint rotations, root translation, actor shape metadata, and source frame rate. Poly Hammer Character Control Rig recognizes SOMA animation and can retarget this file onto a MetaHuman imported into Blender with Character DNA. This avoids estimating the character animation a second time from landmark positions. See [MetaHuman and Blender workflow](docs/metahuman-blender.md).
+
 ## Commands
 
 ```bash
@@ -96,5 +98,6 @@ Runtime data is written under `.kinetrace/` and ignored by git. Delete that dire
 
 - **JSON** preserves normalized image coordinates, contact-anchored world coordinates when support is available, landmark confidence, timestamps, and interpolation flags.
 - **BVH** contains a generic body-and-finger hierarchy in metres. It is an initial interoperability export, not yet a one-click retarget to an arbitrary character.
+- **MetaHuman motion (`.npz`)** is available for GEM-X jobs and preserves its native SOMA pose channels for the Blender/MetaHuman retargeting path.
 
 See [Architecture](docs/architecture.md), [Capture guide](docs/capture-guide.md), and [Model governance](docs/model-governance.md) for details.

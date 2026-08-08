@@ -151,6 +151,7 @@ def process_gemx_video(job_id: str, store: JobStore) -> None:
         return
 
     interchange_path = record.directory / "gemx-motion.json"
+    soma_npz_path = record.directory / "gemx-soma-motion.npz"
     output_root = record.directory / "gemx"
     command = [
         str(settings.gemx_python),
@@ -161,6 +162,8 @@ def process_gemx_video(job_id: str, store: JobStore) -> None:
         str(output_root),
         "--output-json",
         str(interchange_path),
+        "--output-soma-npz",
+        str(soma_npz_path),
         "--static-camera",
     ]
     store.update(
@@ -198,6 +201,8 @@ def process_gemx_video(job_id: str, store: JobStore) -> None:
         raise RuntimeError(f"GEM-X failed: {details}")
     if not interchange_path.is_file():
         raise RuntimeError("GEM-X finished without producing motion data.")
+    if not soma_npz_path.is_file():
+        raise RuntimeError("GEM-X finished without producing SOMA retarget motion.")
 
     store.update(job_id, progress=0.94, stage="Adapting SOMA motion for KineTrace")
     payload = json.loads(interchange_path.read_text(encoding="utf-8"))
@@ -214,6 +219,7 @@ def process_gemx_video(job_id: str, store: JobStore) -> None:
         stage="Ready",
         result_path=result_path,
         bvh_path=bvh_path,
+        soma_npz_path=soma_npz_path,
     )
 
 

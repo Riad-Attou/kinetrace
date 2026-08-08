@@ -24,6 +24,7 @@ class JobRecord:
     error: str | None = None
     result_path: Path | None = None
     bvh_path: Path | None = None
+    soma_npz_path: Path | None = None
     created_at: str = ""
 
     def public(self) -> dict[str, object]:
@@ -32,15 +33,18 @@ class JobRecord:
         payload.pop("directory")
         payload.pop("result_path")
         payload.pop("bvh_path")
-        payload["downloads"] = (
-            {
+        payload.pop("soma_npz_path")
+        if self.status == "complete":
+            downloads = {
                 "json": f"/api/jobs/{self.id}/result",
                 "bvh": f"/api/jobs/{self.id}/bvh",
                 "source": f"/api/jobs/{self.id}/source",
             }
-            if self.status == "complete"
-            else {"source": f"/api/jobs/{self.id}/source"}
-        )
+            if self.soma_npz_path is not None:
+                downloads["soma"] = f"/api/jobs/{self.id}/soma"
+            payload["downloads"] = downloads
+        else:
+            payload["downloads"] = {"source": f"/api/jobs/{self.id}/source"}
         return payload
 
 
