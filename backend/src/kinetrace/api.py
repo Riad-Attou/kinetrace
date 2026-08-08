@@ -140,6 +140,21 @@ def get_bvh(job_id: str) -> FileResponse:
     return FileResponse(record.bvh_path, media_type="text/plain", filename="motion.bvh")
 
 
+@app.get("/api/jobs/{job_id}/soma")
+def get_soma_motion(job_id: str) -> FileResponse:
+    record = _completed_record(job_id)
+    if record.soma_npz_path is None or not record.soma_npz_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="SOMA retarget motion is unavailable for this job",
+        )
+    return FileResponse(
+        record.soma_npz_path,
+        media_type="application/octet-stream",
+        filename="gemx-soma-motion.npz",
+    )
+
+
 def _record_or_404(job_id: str) -> JobRecord:
     record = job_store.get(job_id)
     if record is None:

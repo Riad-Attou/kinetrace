@@ -420,6 +420,11 @@ function Studio({
         </div>
         <div className="export-actions">
           <a className="secondary-action" href={job.downloads.json} download><FileJson size={16} /> JSON</a>
+          {job.downloads.soma && (
+            <a className="primary-action compact" href={job.downloads.soma} download>
+              <Download size={16} /> MetaHuman motion
+            </a>
+          )}
           <a className="primary-action compact" href={job.downloads.bvh} download><Download size={16} /> Export BVH</a>
         </div>
       </div>
