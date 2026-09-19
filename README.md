@@ -6,9 +6,9 @@ The application is intentionally local: uploaded videos, extracted landmarks, an
 
 ## Demo
 
-[![KineTrace GEM-X motion reconstruction demo](docs/assets/kinetrace-gemx-demo-preview.jpg)](docs/assets/kinetrace-gemx-demo.mp4)
+https://github.com/user-attachments/assets/3e1a0f6f-df6a-47e1-b75a-25cd7211deef
 
-[Watch the 17-second demo](docs/assets/kinetrace-gemx-demo.mp4) to see the source overlay,
+[Open or download the 17-second H.264 demo](docs/assets/kinetrace-gemx-demo.mp4) to see the source overlay,
 diagnostic skeleton, and reconstructed SOMA surface playing on a shared timeline. The demo uses
 GEM-X; MediaPipe remains available as the cross-platform CPU option. Source footage by
 [Antoni Shkraba on Pexels](https://www.pexels.com/video/video-of-a-man-dancing-7571381/).

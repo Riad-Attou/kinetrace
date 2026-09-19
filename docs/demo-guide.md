@@ -58,13 +58,16 @@ ffmpeg -i kinetrace-demo-master.mp4 \
   kinetrace-demo-web.mp4
 ```
 
-The current 1080p web copy is intentionally kept in `docs/assets/` because it is a short 5.7 MB
+The current 1080p web copy is intentionally kept in `docs/assets/` because it is a short 2.4 MB
 portfolio preview. Host a longer or higher-quality version on your portfolio, YouTube, Vimeo, or as
-a GitHub attachment/release asset instead of growing the Git repository. The README uses a small
-poster image linked to the checked-in video:
+a GitHub attachment/release asset instead of growing the Git repository. The README uses a GitHub
+video attachment on its own line so GitHub renders native playback controls, followed by a link to
+the checked-in fallback:
 
 ```markdown
-[![Watch the KineTrace demo](docs/assets/kinetrace-gemx-demo-preview.jpg)](docs/assets/kinetrace-gemx-demo.mp4)
+https://github.com/user-attachments/assets/ATTACHMENT_ID
+
+[Open or download the demo](docs/assets/kinetrace-gemx-demo.mp4)
 ```
 
 GitHub documents its current attachment formats and limits in
