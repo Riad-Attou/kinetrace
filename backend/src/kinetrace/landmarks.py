@@ -263,7 +263,7 @@ class _LandmarkState:
 
 
 class TemporalStabilizer:
-    """Lightweight confidence-aware smoothing for the first offline pipeline."""
+    """Apply confidence-aware smoothing to landmark sequences."""
 
     def __init__(self, alpha: float = 0.58, max_gap: int = 4) -> None:
         self.alpha = alpha

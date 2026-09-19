@@ -52,3 +52,21 @@ def test_completed_mediapipe_job_has_no_soma_download(tmp_path: Path) -> None:
     )
 
     assert "soma" not in record.public()["downloads"]
+
+
+def test_missing_completed_exports_return_not_found(tmp_path: Path) -> None:
+    record = JobRecord(
+        id="completed-job-with-missing-exports",
+        filename="source.mp4",
+        source_path=tmp_path / "source.mp4",
+        directory=tmp_path,
+        status="complete",
+    )
+    job_store.add(record)
+
+    with TestClient(app) as client:
+        result_response = client.get(f"/api/jobs/{record.id}/result")
+        bvh_response = client.get(f"/api/jobs/{record.id}/bvh")
+
+    assert result_response.status_code == 404
+    assert bvh_response.status_code == 404

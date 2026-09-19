@@ -50,7 +50,7 @@ def process_video(job_id: str, store: JobStore) -> None:
         duration_ms = int(round(expected_frames * 1000.0 / fps))
         if duration_ms > 10 * 60 * 1000:
             capture.release()
-            raise ValueError("The first milestone supports videos up to 10 minutes long.")
+            raise ValueError("Videos must be 10 minutes or shorter.")
 
         pose_options = mp.tasks.vision.PoseLandmarkerOptions(
             base_options=mp.tasks.BaseOptions(model_asset_path=str(settings.pose_model)),

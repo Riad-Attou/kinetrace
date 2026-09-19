@@ -230,7 +230,8 @@ def _interpolate_and_smooth_world_tracks(
             image_values = np.full((len(frames), 3), np.nan, dtype=float)
             for frame_index in reliable_indices:
                 point = points[frame_index]
-                assert point is not None
+                if point is None:
+                    continue
                 world_values[frame_index] = _world(point)
                 image_values[frame_index] = [
                     float(point[axis]) for axis in ("x", "y", "z")
@@ -256,7 +257,8 @@ def _interpolate_and_smooth_world_tracks(
                     point = points[frame_index]
                     if point is None:
                         template = points[left] or points[right]
-                        assert template is not None
+                        if template is None:
+                            continue
                         point = deepcopy(template)
                         target = (
                             frames[frame_index]["body"]
@@ -287,7 +289,8 @@ def _interpolate_and_smooth_world_tracks(
 
             for frame_index in np.flatnonzero(resolved):
                 point = points[frame_index]
-                assert point is not None
+                if point is None:
+                    continue
                 _set_world(point, filtered[frame_index])
                 if not reliable[frame_index]:
                     point["x"], point["y"], point["z"] = map(
@@ -1042,28 +1045,30 @@ def _align_paired_foot_contacts(
         for track, lateral_sign in zip(
             (left, right), (-1.0, 1.0), strict=True
         ):
-            assert track.limb_offset is not None
+            limb_offset = track.limb_offset
+            if limb_offset is None:
+                continue
             current_forward = float(
-                np.dot(track.limb_offset[[0, 2]], ground_forward)
+                np.dot(limb_offset[[0, 2]], ground_forward)
             )
-            track.limb_offset[[0, 2]] += (
+            limb_offset[[0, 2]] += (
                 ground_forward
                 * (shared_offset_forward - current_forward)
                 * weight
             )
-            track.limb_offset[1] += (
-                shared_offset_height - track.limb_offset[1]
+            limb_offset[1] += (
+                shared_offset_height - limb_offset[1]
             ) * weight
             current_lateral = float(
-                np.dot(track.limb_offset[[0, 2]], ground_lateral)
+                np.dot(limb_offset[[0, 2]], ground_lateral)
             )
-            track.limb_offset[[0, 2]] += (
+            limb_offset[[0, 2]] += (
                 ground_lateral
                 * (lateral_sign * shared_offset_lateral - current_lateral)
                 * weight
             )
-            track.limb_offset[:] = (
-                _unit(track.limb_offset) * offset_lengths[id(track)]
+            limb_offset[:] = (
+                _unit(limb_offset) * offset_lengths[id(track)]
             )
 
 

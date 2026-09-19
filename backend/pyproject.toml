@@ -6,7 +6,6 @@ build-backend = "hatchling.build"
 name = "kinetrace"
 version = "0.2.0"
 description = "Local-first video to 3D skeletal animation studio"
-readme = "../README.md"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.116,<1",
@@ -18,7 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "httpx2>=2.9,<3",
+  "httpx2>=2.13,<3",
   "pytest>=8.4,<10",
   "pytest-cov>=6,<8",
   "ruff>=0.12,<1",

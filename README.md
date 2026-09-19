@@ -25,16 +25,42 @@ The application is intentionally local: uploaded videos, extracted landmarks, an
 
 Webcam capture, manual correction keyframes, side-by-side result comparison, and an optimized MetaHuman browser preview are planned next.
 
-## Arch Linux setup
+## Platform support
+
+The MediaPipe engine is cross-platform. The pinned
+[MediaPipe Python package](https://pypi.org/project/mediapipe/1.0.0/) provides wheels for Linux
+x86-64/ARM64, Windows x64/ARM64, and macOS 11+ on Apple Silicon. KineTrace itself is currently
+tested on 64-bit Arch Linux, so Windows and macOS instructions are expected-compatible paths rather
+than tested release targets. Intel Macs are not supported by the pinned MediaPipe release.
+
+| Mode | Hardware | Current support |
+| --- | --- | --- |
+| MediaPipe | CPU; no dedicated GPU required | Linux, Windows, and Apple Silicon macOS. KineTrace is currently tested on Linux. |
+| GEM-X | CUDA-capable NVIDIA GPU; 8 GB VRAM recommended | Linux only in KineTrace. There is no CPU, AMD, Intel GPU, or Apple Silicon fallback. |
+
+GEM-X also requires a compatible NVIDIA driver and downloads several gigabytes of source,
+Python packages, and model data. Windows users may be able to use WSL2 with NVIDIA GPU
+passthrough, but that path is not currently supported or tested by this project.
+
+The application binds to localhost and processes files on the machine running the backend.
+Opening the page from another computer does not make that computer's GPU available to KineTrace.
+
+## MediaPipe setup
 
 Prerequisites:
 
-- Python 3.12 or newer
+- Python 3.12 recommended
+- Python virtual-environment support (sometimes packaged separately as `python3-venv`)
 - Node.js 22 or newer
 - npm
 - FFmpeg
+- Make on Linux or macOS
 
-On the current development machine, Arch's Python 3.14, Node 26, and FFmpeg 8 are supported by the bootstrap flow.
+Install these with your operating system's package manager or the official language installers.
+
+### Linux and Apple Silicon macOS
+
+Confirm that `python3`, `node`, `npm`, `ffmpeg`, and `make` are available on `PATH`, then run:
 
 ```bash
 make bootstrap
@@ -45,17 +71,47 @@ Open <http://localhost:5173>. The API listens only on <http://127.0.0.1:8000>.
 
 `make bootstrap` creates `.venv`, installs the backend and frontend dependencies, and downloads the official MediaPipe Pose Heavy and Hand Landmarker model bundles into the gitignored `backend/models/` directory.
 
+### Windows PowerShell
+
+Native Windows does not use the repository's Make/Bash shortcuts. Bootstrap MediaPipe mode with:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -e './backend[dev]'
+npm --prefix frontend install
+.\.venv\Scripts\python.exe scripts\download_models.py
+```
+
+Start the API and browser studio in two PowerShell windows:
+
+```powershell
+# Window 1
+.\.venv\Scripts\python.exe -m uvicorn kinetrace.api:app --reload --host 127.0.0.1 --port 8000
+
+# Window 2
+npm --prefix frontend run dev
+```
+
+Then open <http://localhost:5173>. GEM-X remains Linux-only.
+
 ## Optional GEM-X quality engine
 
-GEM-X runs in a separate environment because its pinned CUDA/PyTorch stack conflicts with the lightweight MediaPipe backend. On an NVIDIA machine, install the prerequisites and the pinned integration:
+GEM-X runs in a separate environment because its pinned CUDA/PyTorch stack conflicts with the lightweight MediaPipe backend. It additionally requires:
+
+- a supported NVIDIA GPU and driver (`nvidia-smi` must work);
+- [Git](https://git-scm.com/) and [Git LFS](https://git-lfs.com/);
+- [uv](https://docs.astral.sh/uv/getting-started/installation/).
+
+Install those prerequisites using the method recommended for your Linux distribution, then run:
 
 ```bash
-sudo pacman -S uv git-lfs
+git lfs install
 make gemx
 make dev
 ```
 
-The setup downloads several gigabytes of checkpoints into `.kinetrace/engines/GEM-X`. Restart the app afterward; the first screen will mark GEM-X as **Ready**. Start with a 5–10 second, fixed-camera, full-body clip. Process that same source once with each engine, then compare the source overlay, 3D preview, JSON, and BVH exports. GEM-X is currently run in static-camera mode because that matches KineTrace's capture guidance and avoids treating camera movement as actor travel.
+The setup downloads several gigabytes of checkpoints into `.kinetrace/engines/GEM-X`. Restart the app afterward; the first screen will mark GEM-X as **Ready**. Start with a roughly 5–12 second, fixed-camera, full-body clip. Process that same source once with each engine, then compare the source overlay, 3D preview, JSON, and BVH exports. GEM-X is currently run in static-camera mode because that matches KineTrace's capture guidance and avoids treating camera movement as actor travel.
 
 If GEM-X is stored elsewhere, set `KINETRACE_GEMX_ROOT`. Its Python can be overridden independently with `KINETRACE_GEMX_PYTHON`.
 
@@ -63,7 +119,13 @@ The SAM-3D preprocessing batch defaults to `1` so GEM-X fits an 8 GB GPU; larger
 
 GEM-X jobs also include the animated full-detail SOMA surface. KineTrace stores its per-frame vertices as quantized 16-bit buffers in the motion JSON and decodes them directly in the 3D viewer; the skeleton and BVH remain available for inspection and export. The viewer derives its floor and initial camera target from the reconstructed bounds. A conservative contact pass plants low, open palms and regularizes their finger chains into a natural palm-local fan when GEM-X reports high wrist-contact confidence, while raised or curled/gripping hands are left unchanged.
 
-Every completed GEM-X job additionally exposes **MetaHuman motion**, a canonical SOMA `.npz` containing GEM-X's original 77-joint rotations, root translation, actor shape metadata, and source frame rate. Poly Hammer Character Control Rig recognizes SOMA animation and can retarget this file onto a MetaHuman imported into Blender with Character DNA. This avoids estimating the character animation a second time from landmark positions. See [MetaHuman and Blender workflow](docs/metahuman-blender.md).
+Every completed GEM-X job additionally exposes **MetaHuman motion (`.npz`)**. Despite the
+button name, this is not a MetaHuman character or a finished Blender scene. It is a canonical
+SOMA animation file containing GEM-X's original 77-joint rotations, grounded root translation,
+actor-shape metadata, and source frame rate. The documented Blender workflow uses Poly Hammer
+Character Control Rig to retarget that motion onto a MetaHuman imported separately with Character
+DNA. This preserves GEM-X's native rotations instead of estimating them again from KineTrace's
+generic landmarks. See [MetaHuman and Blender workflow](docs/metahuman-blender.md).
 
 ## Commands
 
@@ -100,4 +162,12 @@ Runtime data is written under `.kinetrace/` and ignored by git. Delete that dire
 - **BVH** contains a generic body-and-finger hierarchy in metres. It is an initial interoperability export, not yet a one-click retarget to an arbitrary character.
 - **MetaHuman motion (`.npz`)** is available for GEM-X jobs and preserves its native SOMA pose channels for the Blender/MetaHuman retargeting path.
 
-See [Architecture](docs/architecture.md), [Capture guide](docs/capture-guide.md), and [Model governance](docs/model-governance.md) for details.
+See [Architecture](docs/architecture.md), [Capture guide](docs/capture-guide.md),
+[Portfolio demo guide](docs/demo-guide.md), and [Model governance](docs/model-governance.md)
+for details.
+
+## License
+
+KineTrace's original source code is licensed under the [Apache License 2.0](LICENSE).
+Third-party software, model code, checkpoints, and assets remain subject to their own terms;
+see [Third-party notices](THIRD_PARTY_NOTICES.md) and [Model governance](docs/model-governance.md).

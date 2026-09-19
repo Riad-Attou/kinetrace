@@ -17,7 +17,7 @@ An open-source implementation license does not automatically determine the terms
 
 - Source: `NVlabs/GEM-X`, pinned by `scripts/setup_gemx.sh` to commit `32992550dba114c62243fb55e361311972dce8f9`.
 - Source license: Apache-2.0.
-- Checkpoints: `nvidia/GEM-X` on Hugging Face, governed by the NVIDIA Open Model License and the third-party notices published with the repository/model card.
+- Checkpoints: `nvidia/GEM-X` on Hugging Face, governed by the NVIDIA Open Model Agreement and the third-party notices published with the repository/model card.
 - Related body model: `NVlabs/SOMA-X`, installed from the GEM-X-pinned submodule revision; Apache-2.0 source with its disclosed third-party identity-model terms.
 - Storage: source, isolated environment, model assets, and generated checksum manifest remain under the gitignored `.kinetrace/engines/GEM-X` directory.
 - Execution: local CUDA inference only; source videos are never uploaded by KineTrace. Setup downloads model weights from Hugging Face.

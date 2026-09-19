@@ -5,6 +5,7 @@ import json
 import sys
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MODEL_DIRECTORY = PROJECT_ROOT / "backend" / "models"
@@ -21,10 +22,16 @@ MODELS = {
 
 
 def download(url: str, destination: Path) -> None:
+    parsed_url = urlparse(url)
+    if parsed_url.scheme != "https" or parsed_url.hostname != "storage.googleapis.com":
+        raise ValueError(f"Refusing model download from untrusted URL: {url}")
     temporary = destination.with_suffix(destination.suffix + ".part")
     print(f"Downloading {destination.name}...")
     request = urllib.request.Request(url, headers={"User-Agent": "KineTrace/0.1"})
-    with urllib.request.urlopen(request, timeout=120) as response, temporary.open("wb") as output:
+    # The URL scheme and host are validated above.
+    with urllib.request.urlopen(request, timeout=120) as response, temporary.open(  # nosec B310
+        "wb"
+    ) as output:
         while chunk := response.read(1024 * 1024):
             output.write(chunk)
     temporary.replace(destination)

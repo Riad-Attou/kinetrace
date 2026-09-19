@@ -242,7 +242,7 @@ function Landing({
             <EngineOption
               name="mediapipe"
               title="MediaPipe"
-              detail="Fast · portable"
+              detail="CPU · no dedicated GPU"
               available={engines?.mediapipe.available ?? false}
               selected={engine === 'mediapipe'}
               onSelect={onEngine}
@@ -250,7 +250,7 @@ function Landing({
             <EngineOption
               name="gemx"
               title="GEM-X"
-              detail="Quality · NVIDIA GPU"
+              detail="Linux · NVIDIA · 8 GB VRAM"
               available={engines?.gemx.available ?? false}
               selected={engine === 'gemx'}
               onSelect={onEngine}
@@ -421,8 +421,13 @@ function Studio({
         <div className="export-actions">
           <a className="secondary-action" href={job.downloads.json} download><FileJson size={16} /> JSON</a>
           {job.downloads.soma && (
-            <a className="primary-action compact" href={job.downloads.soma} download>
-              <Download size={16} /> MetaHuman motion
+            <a
+              className="primary-action compact"
+              href={job.downloads.soma}
+              download
+              title="SOMA animation for retargeting onto a MetaHuman in Blender"
+            >
+              <Download size={16} /> MetaHuman motion (.npz)
             </a>
           )}
           <a className="primary-action compact" href={job.downloads.bvh} download><Download size={16} /> Export BVH</a>

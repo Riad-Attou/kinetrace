@@ -10,11 +10,11 @@ if ! command -v nvidia-smi >/dev/null 2>&1; then
   exit 1
 fi
 if ! command -v uv >/dev/null 2>&1; then
-  echo "Missing uv. On Arch Linux run: sudo pacman -S uv" >&2
+  echo "Missing uv. Install it from https://docs.astral.sh/uv/getting-started/installation/" >&2
   exit 1
 fi
 if ! command -v git-lfs >/dev/null 2>&1; then
-  echo "Missing Git LFS. On Arch Linux run: sudo pacman -S git-lfs" >&2
+  echo "Missing Git LFS. Install it from https://git-lfs.com/" >&2
   exit 1
 fi
 git lfs install

@@ -19,4 +19,9 @@ cleanup() {
 }
 
 trap cleanup EXIT INT TERM
-wait -n "$api_pid" "$web_pid"
+
+# macOS still ships an older Bash without `wait -n`. Polling also lets us stop
+# both processes as soon as either development server exits.
+while kill -0 "$api_pid" 2>/dev/null && kill -0 "$web_pid" 2>/dev/null; do
+  sleep 1
+done

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import sys
 from typing import Literal
 
 from kinetrace.settings import settings
@@ -16,11 +18,15 @@ def engine_status(engine: EngineName) -> dict[str, object]:
         return {
             "available": not missing,
             "label": "MediaPipe",
-            "description": "Fast, portable body and hand landmarks",
+            "description": "CPU mode; no dedicated GPU required",
             "reason": f"Missing {', '.join(missing)}. Run `make models`." if missing else None,
         }
 
     missing = []
+    if not sys.platform.startswith("linux"):
+        missing.append("Linux host")
+    if shutil.which("nvidia-smi") is None:
+        missing.append("NVIDIA CUDA driver")
     if not settings.gemx_demo.is_file():
         missing.append("GEM-X checkout")
     if not settings.gemx_python.is_file():
@@ -42,7 +48,7 @@ def engine_status(engine: EngineName) -> dict[str, object]:
     return {
         "available": not missing,
         "label": "GEM-X",
-        "description": "GPU quality mode with global SOMA motion and articulated hands",
+        "description": "Linux mode requiring an NVIDIA CUDA GPU; 8 GB VRAM recommended",
         "reason": f"Missing {', '.join(missing)}. Run `make gemx`." if missing else None,
     }
 

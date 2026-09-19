@@ -185,7 +185,9 @@ def process_gemx_video(job_id: str, store: JobStore) -> None:
         bufsize=1,
     )
     output_tail: deque[str] = deque(maxlen=120)
-    assert process.stdout is not None
+    if process.stdout is None:
+        process.kill()
+        raise RuntimeError("GEM-X process output could not be captured.")
     for raw_line in process.stdout:
         line = raw_line.strip()
         if not line:

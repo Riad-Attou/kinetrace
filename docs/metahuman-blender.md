@@ -1,6 +1,8 @@
 # MetaHuman and Blender workflow
 
-KineTrace uses MetaHuman as the presentation character for GEM-X motion. The MediaPipe mannequin is deliberately unchanged. The first production path targets Blender rendering; a browser-optimized MetaHuman is a later, separate asset pipeline.
+KineTrace can export GEM-X motion for retargeting onto a MetaHuman in Blender. It does not
+include a MetaHuman character, modify the MediaPipe mannequin, or render a MetaHuman in the
+browser.
 
 ## Pinned starting point
 
@@ -10,6 +12,9 @@ KineTrace uses MetaHuman as the presentation character for GEM-X motion. The Med
 - Poly Hammer Character Control Rig with Rigify (separately sold convenience layer)
 
 Character DNA imports the MetaHuman head/body DNA and evaluates its RigLogic and body RBF correctives in Blender. Character Control Rig adds animator-friendly controls and recognizes SOMA animation as an import template. MetaHuman and Character DNA's core edition are free under their respective terms; Character Control Rig is not. KineTrace's native NPZ export remains useful if that retargeting layer is replaced later.
+
+The **MetaHuman motion** download is a SOMA `.npz` animation, not a MetaHuman asset. It appears
+only for completed GEM-X jobs because MediaPipe does not produce GEM-X's native SOMA rotations.
 
 ## Character preparation
 

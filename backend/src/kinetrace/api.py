@@ -129,14 +129,22 @@ def get_source(job_id: str) -> FileResponse:
 @app.get("/api/jobs/{job_id}/result")
 def get_result(job_id: str) -> FileResponse:
     record = _completed_record(job_id)
-    assert record.result_path is not None
+    if record.result_path is None or not record.result_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Motion result is unavailable for this job",
+        )
     return FileResponse(record.result_path, media_type="application/json", filename="motion.json")
 
 
 @app.get("/api/jobs/{job_id}/bvh")
 def get_bvh(job_id: str) -> FileResponse:
     record = _completed_record(job_id)
-    assert record.bvh_path is not None
+    if record.bvh_path is None or not record.bvh_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="BVH export is unavailable for this job",
+        )
     return FileResponse(record.bvh_path, media_type="text/plain", filename="motion.bvh")
 
 

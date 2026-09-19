@@ -42,10 +42,9 @@ The browser drives both its diagnostic skeleton and a built-in segmented mannequ
 
 ## Deliberate boundaries
 
-- Processing jobs are in memory in this first milestone; result files remain on disk, but the job list does not survive an API restart.
+- Processing jobs are kept in memory; result files remain on disk, but the job list does not survive an API restart.
 - Global root motion is recovered while reliable planted-foot contacts exist. Unanchored travel through a room remains underconstrained from one camera.
-- Hand-contact detection is automatic and conservative, but it is still an inference rather than a user-confirmed physical constraint.
-- Contact inference is conservative but automatic; clips with sliding feet or no stable support may remain unanchored.
+- Contact detection is automatic rather than user-confirmed; clips with sliding feet or no stable support may remain unanchored.
 - Finger/world fusion is approximate because the body and hand models use different world origins.
 - Hand tracking percentages report directly detected frames, not a landmark-confidence score.
 - The BVH exporter prioritizes a valid, inspectable armature hierarchy. Twist, contact, and retargeting polish are subsequent milestones.

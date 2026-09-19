@@ -201,16 +201,18 @@ def _rest_positions(
     rest = {"Hips": np.median(np.stack(roots), axis=0)}
 
     for joint in joints[1:]:
-        assert joint.parent is not None
+        parent = joint.parent
+        if parent is None:
+            raise ValueError(f"Joint {joint.name} has no parent")
         offsets = [
-            frame[joint.name] - frame[joint.parent]
+            frame[joint.name] - frame[parent]
             for frame in frames
-            if joint.name in frame and joint.parent in frame
+            if joint.name in frame and parent in frame
         ]
         offset = np.median(np.stack(offsets), axis=0) if offsets else _fallback_offset(joint.name)
         if float(np.linalg.norm(offset)) < 1e-5:
             offset = _fallback_offset(joint.name)
-        rest[joint.name] = rest[joint.parent] + offset
+        rest[joint.name] = rest[parent] + offset
     return rest
 
 
