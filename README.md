@@ -4,6 +4,15 @@ KineTrace is a local-first monocular motion-capture studio. It turns a video of 
 
 The application is intentionally local: uploaded videos, extracted landmarks, and exports remain on your computer.
 
+## Demo
+
+[![KineTrace GEM-X motion reconstruction demo](docs/assets/kinetrace-gemx-demo-preview.jpg)](docs/assets/kinetrace-gemx-demo.mp4)
+
+[Watch the 17-second demo](docs/assets/kinetrace-gemx-demo.mp4) to see the source overlay,
+diagnostic skeleton, and reconstructed SOMA surface playing on a shared timeline. The demo uses
+GEM-X; MediaPipe remains available as the cross-platform CPU option. Source footage by
+[Antoni Shkraba on Pexels](https://www.pexels.com/video/video-of-a-man-dancing-7571381/).
+
 ## Current scope
 
 - Upload MP4, MOV, WebM, MKV, or AVI video.

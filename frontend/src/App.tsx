@@ -356,6 +356,7 @@ function PipelineStep({ number, icon, label, last = false }: { number: string; i
 
 function Processing({ job, error, onReset }: { job: Job; error: string | null; onReset: () => void }) {
   const failed = job.status === 'failed' || Boolean(error)
+  const failureMessage = failed ? processingErrorMessage(job, error) : null
   return (
     <div className="processing-page">
       <div className={`processing-orb ${failed ? 'failed' : ''}`}>
@@ -365,7 +366,9 @@ function Processing({ job, error, onReset }: { job: Job; error: string | null; o
         {failed ? 'Analysis interrupted' : `${job.engine === 'gemx' ? 'GEM-X' : 'MediaPipe'} reconstruction`}
       </div>
       <h2>{failed ? 'Something needs attention' : job.stage}</h2>
-      <p>{failed ? (error ?? job.error) : job.filename}</p>
+      <p className={failed ? 'failure-message' : undefined}>
+        {failed ? failureMessage : job.filename}
+      </p>
       {!failed && (
         <div className="progress-card">
           <div className="progress-track"><div style={{ width: `${Math.round(job.progress * 100)}%` }} /></div>
@@ -375,6 +378,21 @@ function Processing({ job, error, onReset }: { job: Job; error: string | null; o
       {failed && <button className="secondary-action" type="button" onClick={onReset}>Choose another video</button>}
     </div>
   )
+}
+
+function processingErrorMessage(job: Job, error: string | null): string {
+  const message = error ?? job.error ?? 'Processing failed.'
+  if (
+    job.engine === 'gemx'
+    && message.includes('Extracting SAM-3D image features')
+    && !message.includes('Traceback (most recent call last)')
+  ) {
+    return 'GEM-X was stopped while extracting SAM-3D features, most likely because system or GPU memory ran out. Retry with the 1080p video and close other GPU-heavy applications.'
+  }
+  if (message.length > 700) {
+    return `${message.slice(0, 697)}…`
+  }
+  return message
 }
 
 type StudioProps = {

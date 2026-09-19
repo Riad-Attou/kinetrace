@@ -1,28 +1,28 @@
 # Portfolio demo guide
 
-## Recommended public input clip
+## Demo input clip
 
-Use [Man Doing Push-Ups by Ketut Subiyanto on Pexels](https://www.pexels.com/video/man-doing-push-ups-4804794/).
-It is an existing 11.6-second, fixed-camera, landscape clip with one fully visible person, open
-hands, planted feet, and several complete repetitions. Those properties make it a good match for
-KineTrace's body, hand, and contact tracking. The 1080p download is sufficient; 4K adds processing
-time without making the portfolio demo noticeably clearer.
+The repository demo uses
+[Video of a Man Dancing by Antoni Shkraba on Pexels](https://www.pexels.com/video/video-of-a-man-dancing-7571381/).
+It is a landscape studio recording with one fully visible performer and varied arm, leg, and torso
+motion. Download the 1080p version and trim one continuous section to roughly 5–12 seconds. Avoid
+the UHD download: it increases SAM-3D memory use without making the portfolio recording noticeably
+clearer.
 
-Both current engines were checked against the 1080p version. MediaPipe completed it with body pose
-on every frame and direct hand detections on roughly 77–82% of frames. GEM-X completed it with body
-and both-hand coverage on every frame and produced the SOMA/MetaHuman motion export. Single-camera
-depth is still an estimate, so inspect the reconstruction before recording the walkthrough.
+The checked-in walkthrough processes an approximately 8.4-second excerpt with GEM-X and shows its
+source overlay, diagnostic skeleton, reconstructed SOMA surface, and export controls. Single-camera
+depth is still an estimate, so inspect any new reconstruction before recording another walkthrough.
 
 Pexels currently permits downloading, editing, and using its videos for free, including online and
 promotional use; attribution is not required. Review the
 [Pexels license](https://www.pexels.com/license/) when you publish because third-party terms can
 change. Credit is still good portfolio practice:
 
-> Input footage: “Man Doing Push-Ups” by Ketut Subiyanto, via Pexels.
+> Input footage: “Video of a Man Dancing” by Antoni Shkraba, via Pexels.
 
-Download the clip from its Pexels page rather than committing a copy to this repository. Preserve a
-copy of the license page with the portfolio project so the terms used at publication time are easy
-to verify later, and do not imply that the person in the clip endorses KineTrace.
+The repository contains only the KineTrace screen recording, not a standalone copy of the source
+clip. Preserve a copy of the license page with the portfolio project so the terms used at
+publication time are easy to verify later, and do not imply that the performer endorses KineTrace.
 
 If the camera movement or framing is changed on Pexels in the future, choose another clip only when
 it shows one person from head to feet for the entire shot, keeps the camera fixed, contains no cuts,
@@ -58,12 +58,13 @@ ffmpeg -i kinetrace-demo-master.mp4 \
   kinetrace-demo-web.mp4
 ```
 
-Prefer hosting the video on your portfolio, YouTube, Vimeo, or as a GitHub attachment/release
-asset instead of committing it to the repository. Once it has a stable URL, add a small poster
-image to the repository and make it clickable from the README:
+The current 1080p web copy is intentionally kept in `docs/assets/` because it is a short 5.7 MB
+portfolio preview. Host a longer or higher-quality version on your portfolio, YouTube, Vimeo, or as
+a GitHub attachment/release asset instead of growing the Git repository. The README uses a small
+poster image linked to the checked-in video:
 
 ```markdown
-[![Watch the KineTrace demo](docs/assets/demo-poster.jpg)](VIDEO_URL)
+[![Watch the KineTrace demo](docs/assets/kinetrace-gemx-demo-preview.jpg)](docs/assets/kinetrace-gemx-demo.mp4)
 ```
 
 GitHub documents its current attachment formats and limits in

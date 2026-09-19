@@ -295,6 +295,16 @@ main { min-height: calc(100vh - 72px); }
 @keyframes pulse { 50% { box-shadow: 0 0 0 16px rgba(216,255,89,0); transform: scale(1.03); } }
 .processing-page h2 { margin: 15px 0 8px; font-size: clamp(29px, 4vw, 45px); letter-spacing: -.045em; }
 .processing-page > p { color: var(--muted); margin: 0; }
+.processing-page > .failure-message {
+  width: min(720px, 92vw);
+  padding: 14px 17px;
+  color: #b8bec6;
+  background: rgba(255, 110, 159, .05);
+  border: 1px solid rgba(255, 110, 159, .18);
+  border-radius: 10px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
 .progress-card { width: min(560px, 92vw); margin-top: 38px; }
 .progress-track { height: 5px; border-radius: 5px; overflow: hidden; background: #24282e; }
 .progress-track div { height: 100%; background: var(--accent); transition: width .4s ease; box-shadow: 0 0 18px rgba(216,255,89,.45); }
